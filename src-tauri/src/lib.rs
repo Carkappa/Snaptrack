@@ -1,8 +1,8 @@
-mod commands;
+pub mod commands;
 mod excel;
 mod extraction;
 mod keychain;
-mod models;
+pub mod models;
 
 use tauri::{
     menu::{Menu, MenuItem},

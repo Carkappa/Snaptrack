@@ -8,7 +8,7 @@ use tauri_plugin_store::StoreExt;
 const STORE_FILE: &str = "settings.json";
 const EXCEL_PATH_KEY: &str = "excel_path";
 
-fn default_excel_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn default_excel_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
     let docs = app
         .path()
         .document_dir()
@@ -16,7 +16,7 @@ fn default_excel_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(docs.join("JobApplications.xlsx"))
 }
 
-fn resolve_excel_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn resolve_excel_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
     let store = app
         .store(STORE_FILE)
         .map_err(|e| format!("Could not open settings store: {e}"))?;
@@ -61,13 +61,13 @@ pub async fn extract_from_image(
 }
 
 #[tauri::command]
-pub fn get_excel_path(app: tauri::AppHandle) -> Result<String, String> {
+pub fn get_excel_path<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
     let path = resolve_excel_path(&app)?;
     Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub fn set_excel_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+pub fn set_excel_path<R: tauri::Runtime>(app: tauri::AppHandle<R>, path: String) -> Result<(), String> {
     let store = app
         .store(STORE_FILE)
         .map_err(|e| format!("Could not open settings store: {e}"))?;
@@ -78,7 +78,7 @@ pub fn set_excel_path(app: tauri::AppHandle, path: String) -> Result<(), String>
 }
 
 #[tauri::command]
-pub async fn pick_excel_path(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn pick_excel_path<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let default_path = default_excel_path(&app).ok();
     let (tx, rx) = std::sync::mpsc::channel();
@@ -102,7 +102,7 @@ pub async fn pick_excel_path(app: tauri::AppHandle) -> Result<Option<String>, St
 }
 
 #[tauri::command]
-pub async fn pick_image_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn pick_image_file<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog()
@@ -144,7 +144,7 @@ pub fn read_image_file(path: String) -> Result<ImagePayload, String> {
 /// clipboard-manager plugin's Rust API (not a JS paste/clipboardData
 /// event), encodes it to PNG, and returns it as base64.
 #[tauri::command]
-pub fn read_clipboard_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub fn read_clipboard_image<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Option<String>, String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
 
     let image = match app.clipboard().read_image() {
@@ -171,14 +171,14 @@ pub fn read_clipboard_image(app: tauri::AppHandle) -> Result<Option<String>, Str
 }
 
 #[tauri::command]
-pub fn list_applications(app: tauri::AppHandle) -> Result<Vec<JobApplication>, String> {
+pub fn list_applications<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Vec<JobApplication>, String> {
     let path = resolve_excel_path(&app)?;
     excel::read_applications(&path)
 }
 
 #[tauri::command]
-pub fn save_application(
-    app: tauri::AppHandle,
+pub fn save_application<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     application: JobApplication,
     force: bool,
 ) -> Result<SaveResult, String> {
@@ -200,8 +200,8 @@ pub fn save_application(
 }
 
 #[tauri::command]
-pub fn update_existing_status(
-    app: tauri::AppHandle,
+pub fn update_existing_status<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     company: String,
     position: String,
     status: String,
@@ -229,8 +229,8 @@ pub fn update_existing_status(
 }
 
 #[tauri::command]
-pub fn update_status_at_index(
-    app: tauri::AppHandle,
+pub fn update_status_at_index<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     index: usize,
     status: String,
 ) -> Result<(), String> {
