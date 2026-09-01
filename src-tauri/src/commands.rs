@@ -245,3 +245,98 @@ pub fn update_status_at_index<R: tauri::Runtime>(
 
     excel::write_applications(&path, &rows)
 }
+
+/// Overwrites a row in place (edit flow from the Applications list),
+/// as opposed to `save_application` which appends a new row.
+#[tauri::command]
+pub fn update_application_at_index<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    index: usize,
+    application: JobApplication,
+) -> Result<(), String> {
+    let path = resolve_excel_path(&app)?;
+    let mut rows = excel::read_applications(&path)?;
+
+    let row = rows
+        .get_mut(index)
+        .ok_or_else(|| "That row no longer exists - reload the list and try again.".to_string())?;
+    *row = application;
+
+    excel::write_applications(&path, &rows)
+}
+
+#[tauri::command]
+pub fn export_csv<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
+    let path = resolve_excel_path(&app)?;
+    let rows = excel::read_applications(&path)?;
+    let csv_path = excel::export_csv(&path, &rows)?;
+    Ok(csv_path.to_string_lossy().to_string())
+}
+
+fn sanitize_for_filename(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == ' ' { c } else { '_' })
+        .collect();
+    let trimmed = cleaned.trim();
+    let truncated: String = trimmed.chars().take(60).collect();
+    if truncated.is_empty() {
+        "untitled".to_string()
+    } else {
+        truncated.replace(' ', "_")
+    }
+}
+
+/// Saves a copy of the screenshot a capture was made from into a
+/// `<workbook dir>/JobApplications_screenshots/` folder, named after the
+/// company/position/date, purely for the user's own reference - it is
+/// not linked from any Excel column.
+fn extension_for_media_type(media_type: &str) -> &'static str {
+    match media_type {
+        "image/jpeg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        _ => "png",
+    }
+}
+
+/// Saves a copy of the screenshot a capture was made from into a
+/// `<workbook dir>/JobApplications_screenshots/` folder, named after the
+/// company/position/date, purely for the user's own reference - it is
+/// not linked from any Excel column.
+#[tauri::command]
+pub fn save_screenshot<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    company: String,
+    position: String,
+    date_applied: String,
+    image_base64: String,
+    media_type: String,
+) -> Result<String, String> {
+    let excel_path = resolve_excel_path(&app)?;
+    let parent = excel_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| "Workbook has no parent directory.".to_string())?;
+
+    let screenshots_dir = parent.join("JobApplications_screenshots");
+    std::fs::create_dir_all(&screenshots_dir)
+        .map_err(|e| format!("Could not create '{}': {e}", screenshots_dir.display()))?;
+
+    let file_name = format!(
+        "{}_{}_{}.{}",
+        sanitize_for_filename(&date_applied),
+        sanitize_for_filename(&company),
+        sanitize_for_filename(&position),
+        extension_for_media_type(&media_type)
+    );
+    let file_path = screenshots_dir.join(file_name);
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(image_base64)
+        .map_err(|e| format!("Invalid image data: {e}"))?;
+    std::fs::write(&file_path, bytes)
+        .map_err(|e| format!("Could not save screenshot to '{}': {e}", file_path.display()))?;
+
+    Ok(file_path.to_string_lossy().to_string())
+}

@@ -105,6 +105,9 @@ pub fn run() {
             commands::save_application,
             commands::update_existing_status,
             commands::update_status_at_index,
+            commands::update_application_at_index,
+            commands::export_csv,
+            commands::save_screenshot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the job tracker application");

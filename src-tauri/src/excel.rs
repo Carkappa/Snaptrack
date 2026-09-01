@@ -104,6 +104,43 @@ pub fn read_applications(path: &Path) -> Result<Vec<JobApplication>, String> {
     Ok(rows)
 }
 
+/// Exports the current rows to a `.csv` file next to the workbook
+/// (same name, `.csv` extension), overwriting it each time.
+pub fn export_csv(xlsx_path: &Path, rows: &[JobApplication]) -> Result<PathBuf, String> {
+    let csv_path = xlsx_path.with_extension("csv");
+    let mut writer = csv::Writer::from_path(&csv_path)
+        .map_err(|e| format!("Could not create '{}': {e}", csv_path.display()))?;
+
+    writer
+        .write_record(HEADERS)
+        .map_err(|e| format!("Could not write CSV header: {e}"))?;
+
+    for app in rows {
+        writer
+            .write_record([
+                app.date_applied.as_str(),
+                app.company.as_str(),
+                app.position.as_str(),
+                app.location.as_deref().unwrap_or(""),
+                app.work_type.as_deref().unwrap_or(""),
+                app.employment_type.as_deref().unwrap_or(""),
+                app.salary_range.as_deref().unwrap_or(""),
+                app.status.as_str(),
+                app.last_updated.as_str(),
+                app.job_id.as_deref().unwrap_or(""),
+                app.url.as_deref().unwrap_or(""),
+                app.notes.as_deref().unwrap_or(""),
+            ])
+            .map_err(|e| format!("Could not write CSV row: {e}"))?;
+    }
+
+    writer
+        .flush()
+        .map_err(|e| format!("Could not finish writing '{}': {e}", csv_path.display()))?;
+
+    Ok(csv_path)
+}
+
 fn describe_open_error(e: calamine::XlsxError, path: &Path) -> String {
     format!(
         "Could not open '{}'. It may be corrupted or not a valid .xlsx file: {e}",
@@ -250,6 +287,11 @@ pub fn write_applications(path: &Path, rows: &[JobApplication]) -> Result<(), St
         .save(&tmp_path)
         .map_err(|e| format!("Could not write workbook: {e}"))?;
 
+    if path.exists() {
+        // Best-effort: a failed backup should never block the actual save.
+        let _ = backup_before_overwrite(path);
+    }
+
     match std::fs::rename(&tmp_path, path) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -264,6 +306,61 @@ pub fn write_applications(path: &Path, rows: &[JobApplication]) -> Result<(), St
             }
         }
     }
+}
+
+const MAX_BACKUPS: usize = 10;
+
+/// Copies the existing workbook into a `backups/` folder next to it,
+/// timestamped, before it gets overwritten - cheap insurance against a
+/// bad edit. Runs only at save time, so it stays consistent with the
+/// app's "no background process" design.
+fn backup_before_overwrite(path: &Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| "Workbook has no parent directory.".to_string())?;
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("JobApplications");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("xlsx");
+
+    let backups_dir = parent.join("backups");
+    std::fs::create_dir_all(&backups_dir).map_err(|e| e.to_string())?;
+
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let backup_path = backups_dir.join(format!("{stem}_{timestamp}.{ext}"));
+    std::fs::copy(path, &backup_path).map_err(|e| e.to_string())?;
+
+    prune_old_backups(&backups_dir, stem, ext)
+}
+
+fn prune_old_backups(backups_dir: &Path, stem: &str, ext: &str) -> Result<(), String> {
+    let prefix = format!("{stem}_");
+    let suffix = format!(".{ext}");
+
+    let mut backups: Vec<PathBuf> = std::fs::read_dir(backups_dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with(&prefix) && n.ends_with(&suffix))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    // Timestamped filenames sort lexicographically in chronological order.
+    backups.sort();
+
+    if backups.len() > MAX_BACKUPS {
+        for old in &backups[..backups.len() - MAX_BACKUPS] {
+            let _ = std::fs::remove_file(old);
+        }
+    }
+
+    Ok(())
 }
 
 fn is_lock_error(e: &std::io::Error) -> bool {
@@ -351,6 +448,67 @@ mod tests {
         write_applications(&path, &[sample_app("Acme", "Engineer", "Applied")]).unwrap();
         assert!(path.exists());
         assert!(!temp_path_for(&path).exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn second_write_creates_a_backup_of_the_first() {
+        let dir = std::env::temp_dir().join(format!("job-tracker-test-backup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Applications.xlsx");
+
+        write_applications(&path, &[sample_app("Acme", "Engineer", "Applied")]).unwrap();
+        let backups_dir = dir.join("backups");
+        assert!(!backups_dir.exists(), "first write has nothing to back up yet");
+
+        write_applications(&path, &[sample_app("Acme", "Engineer", "Interviewing")]).unwrap();
+        assert!(backups_dir.exists());
+        let backup_files: Vec<_> = std::fs::read_dir(&backups_dir).unwrap().collect();
+        assert_eq!(backup_files.len(), 1, "second write should back up the first version");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn old_backups_beyond_the_limit_are_pruned() {
+        let dir = std::env::temp_dir().join(format!("job-tracker-test-prune-{}", std::process::id()));
+        let backups_dir = dir.join("backups");
+        std::fs::create_dir_all(&backups_dir).unwrap();
+
+        for i in 0..(MAX_BACKUPS + 5) {
+            std::fs::write(
+                backups_dir.join(format!("Applications_2026010{i:02}-000000.xlsx")),
+                b"x",
+            )
+            .unwrap();
+        }
+
+        prune_old_backups(&backups_dir, "Applications", "xlsx").unwrap();
+        let remaining = std::fs::read_dir(&backups_dir).unwrap().count();
+        assert_eq!(remaining, MAX_BACKUPS);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn csv_export_matches_saved_rows() {
+        let dir = std::env::temp_dir().join(format!("job-tracker-test-csv-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let xlsx_path = dir.join("Applications.xlsx");
+
+        let rows = vec![
+            sample_app("Acme", "Engineer", "Applied"),
+            sample_app("Globex", "Designer", "Offered"),
+        ];
+        let csv_path = export_csv(&xlsx_path, &rows).unwrap();
+        assert_eq!(csv_path, dir.join("Applications.csv"));
+
+        let contents = std::fs::read_to_string(&csv_path).unwrap();
+        let mut lines = contents.lines();
+        assert_eq!(lines.next().unwrap(), HEADERS.join(","));
+        assert!(lines.next().unwrap().contains("Acme"));
+        assert!(lines.next().unwrap().contains("Globex"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

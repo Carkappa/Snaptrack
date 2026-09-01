@@ -330,12 +330,35 @@ main {
 .list-toolbar {
   flex-shrink: 0;
   margin-bottom: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.list-toolbar input {
+  flex: 1;
 }
 
 .list-status {
   color: var(--muted);
   font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.list-stats {
+  color: var(--muted);
+  font-size: 11.5px;
   margin-bottom: 6px;
+}
+
+.editing-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 12px;
 }
 
 .table-scroll {
@@ -366,6 +389,11 @@ main {
   top: 0;
   background: var(--panel);
   font-weight: 600;
+}
+
+#applications-table tbody tr:hover {
+  background: var(--panel);
+  cursor: pointer;
 }
 
 #applications-table select {

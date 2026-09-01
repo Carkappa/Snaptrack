@@ -30,6 +30,9 @@
     pasteHintKey: el("paste-hint-key"),
 
     form: el("application-form"),
+    editingBanner: el("editing-banner"),
+    discardEditBtn: el("discard-edit-btn"),
+    formSaveBtn: el("form-save"),
     fCompany: el("f-company"),
     fPosition: el("f-position"),
     fLocation: el("f-location"),
@@ -51,6 +54,8 @@
 
     searchBox: el("search-box"),
     listStatus: el("list-status"),
+    listStats: el("list-stats"),
+    exportCsvBtn: el("export-csv-btn"),
     tbody: el("applications-tbody"),
 
     apiKeyStatus: el("api-key-status"),
@@ -72,6 +77,8 @@
   let allApplications = [];
   let pendingRetry = null; // { fn: () => Promise, label: string }
   let setupDismissedThisSession = false;
+  let editingIndex = null; // set when editing an existing row from the list tab
+  let currentImage = null; // { base64, mediaType } of the screenshot behind the current form, if any
 
   function todayIso() {
     const d = new Date();
@@ -191,7 +198,45 @@
     dom.form.reset();
     dom.fStatus.value = "Applied";
     dom.fDateApplied.value = todayIso();
+    currentImage = null;
+    exitEditMode();
   }
+
+  function exitEditMode() {
+    editingIndex = null;
+    dom.editingBanner.hidden = true;
+    dom.formSaveBtn.textContent = "Save (Enter)";
+  }
+
+  function enterEditModeFor(index) {
+    const app = allApplications[index];
+    if (!app) return;
+    resetCaptureArea();
+    editingIndex = index;
+    currentImage = null;
+    dom.editingBanner.hidden = false;
+    dom.formSaveBtn.textContent = "Update (Enter)";
+
+    dom.fCompany.value = app.company || "";
+    dom.fPosition.value = app.position || "";
+    dom.fLocation.value = app.location || "";
+    dom.fWorkType.value = app.work_type || "";
+    dom.fEmploymentType.value = app.employment_type || "";
+    dom.fSalaryRange.value = app.salary_range || "";
+    dom.fStatus.value = app.status || "Applied";
+    dom.fDateApplied.value = app.date_applied || todayIso();
+    dom.fJobId.value = app.job_id || "";
+    dom.fUrl.value = app.url || "";
+    dom.fNotes.value = app.notes || "";
+
+    dom.form.hidden = false;
+    activateTab("capture");
+    dom.fCompany.focus();
+  }
+
+  dom.discardEditBtn.addEventListener("click", () => {
+    resetCaptureArea();
+  });
 
   function showBlankForm() {
     dom.thumbnailWrap.hidden = true;
@@ -211,6 +256,8 @@
   }
 
   async function processImage(base64, mediaType) {
+    exitEditMode();
+    currentImage = { base64, mediaType };
     dom.thumbnailWrap.hidden = false;
     dom.thumbnail.src = `data:${mediaType};base64,${base64}`;
     dom.thumbnailStatus.textContent = "Extracting details…";
@@ -331,13 +378,46 @@
     };
   }
 
+  async function saveScreenshotIfPresent(application) {
+    if (!currentImage) return;
+    try {
+      await invoke("save_screenshot", {
+        company: application.company,
+        position: application.position,
+        dateApplied: application.date_applied,
+        imageBase64: currentImage.base64,
+        mediaType: currentImage.mediaType,
+      });
+    } catch (_) {
+      // Best-effort convenience copy - never block a successful save on this.
+    }
+  }
+
+  async function attemptUpdate() {
+    hideError(dom.saveError);
+    const application = collectFormApplication();
+    try {
+      await invoke("update_application_at_index", { index: editingIndex, application });
+      allApplications[editingIndex] = application;
+      resetCaptureArea();
+      activateTab("capture");
+    } catch (e) {
+      showError(dom.saveError, String(e));
+      showRetryToast("Update failed - your entry is still here.", () => attemptUpdate());
+    }
+  }
+
   async function attemptSave(force) {
+    if (editingIndex !== null) {
+      return attemptUpdate();
+    }
     hideError(dom.saveError);
     const application = collectFormApplication();
     try {
       const result = await invoke("save_application", { application, force });
       if (result.outcome === "Saved") {
         dom.duplicateBanner.hidden = true;
+        await saveScreenshotIfPresent(application);
         resetCaptureArea();
         activateTab("capture");
       } else if (result.outcome === "Duplicate") {
@@ -381,17 +461,28 @@
 
   // ---------- List tab ----------
 
-  function statusPill(status) {
-    return `<span class="status-pill status-${status}">${status}</span>`;
-  }
-
   function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s == null ? "" : s;
     return div.innerHTML;
   }
 
+  function renderStats() {
+    if (allApplications.length === 0) {
+      dom.listStats.textContent = "";
+      return;
+    }
+    const counts = {};
+    for (const app of allApplications) {
+      counts[app.status] = (counts[app.status] || 0) + 1;
+    }
+    dom.listStats.textContent = Object.entries(counts)
+      .map(([status, count]) => `${count} ${status}`)
+      .join(" · ");
+  }
+
   function renderApplicationsTable() {
+    renderStats();
     const query = dom.searchBox.value.trim().toLowerCase();
     const rows = allApplications
       .map((app, index) => ({ app, index }))
@@ -417,7 +508,7 @@
         const url = app.url
           ? `<a href="#" data-url="${escapeHtml(app.url)}" class="row-url">link</a>`
           : "";
-        return `<tr>
+        return `<tr data-index="${index}" class="app-row">
           <td>${escapeHtml(app.date_applied)}</td>
           <td>${escapeHtml(app.company)}</td>
           <td>${escapeHtml(app.position)}</td>
@@ -468,7 +559,12 @@
       e.preventDefault();
       // Webview navigation to arbitrary external URLs is intentionally
       // not wired up; the link text still lets users copy/see the URL.
+      return;
     }
+    if (e.target.classList.contains("row-status")) return;
+    const row = e.target.closest(".app-row");
+    if (!row) return;
+    enterEditModeFor(Number(row.dataset.index));
   });
 
   async function loadApplications() {
@@ -487,6 +583,15 @@
   }
 
   dom.searchBox.addEventListener("input", renderApplicationsTable);
+
+  dom.exportCsvBtn.addEventListener("click", async () => {
+    try {
+      const path = await invoke("export_csv");
+      dom.listStatus.textContent = `Exported to ${path}`;
+    } catch (e) {
+      dom.listStatus.textContent = `Couldn't export CSV: ${e}`;
+    }
+  });
 
   // ---------- Settings tab ----------
 

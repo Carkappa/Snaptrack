@@ -57,6 +57,10 @@
         </div>
 
         <form id="application-form" class="app-form" hidden>
+          <div id="editing-banner" class="editing-banner" hidden>
+            <span>Editing an existing entry</span>
+            <button type="button" id="discard-edit-btn" class="btn btn-link btn-small">Discard changes</button>
+          </div>
           <div class="field-row">
             <label for="f-company">Company *</label>
             <input id="f-company" name="company" type="text" required />
@@ -134,8 +138,11 @@
       <section id="tab-list" class="tab-panel">
         <div class="list-toolbar">
           <input id="search-box" type="search" placeholder="Search company or position&hellip;" />
+          <button id="export-csv-btn" class="btn btn-secondary btn-small">Export CSV</button>
         </div>
         <div id="list-status" class="list-status">Loading&hellip;</div>
+        <div id="list-stats" class="list-stats"></div>
+        <p class="hint">Click a row to edit it. Use the Status dropdown for a quick status-only change.</p>
         <div class="table-scroll">
           <table id="applications-table">
             <thead>
