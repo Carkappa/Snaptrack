@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- These are dev pages edited constantly; a cached copy reads as a bug
+       in the code you just changed. -->
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <title>Format logic tests</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 13px; margin: 16px; }
+    #summary { font-weight: 700; font-size: 15px; margin-bottom: 10px; }
+    #summary.pass { color: #15803d; }
+    #summary.fail { color: #b91c1c; }
+    li { margin-bottom: 2px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    li.fail { color: #b91c1c; }
+    li.pass { color: #15803d; }
+  </style>
+</head>
+<body>
+  <h1>Format logic tests</h1>
+  <p>Escaping tests for <code>src/format.js</code>. Every value the app renders
+     came off a screenshot, an OCR pass, or a spreadsheet cell, so this is the
+     one frontend function where a mistake is a security bug.</p>
+  <div id="summary">Running&hellip;</div>
+  <ul id="results"></ul>
+
+  <script src="../src/format.js"></script>
+  <script>
+    (() => {
+      "use strict";
+      const { escapeHtml } = window.JobTrackerFormat;
+      const results = [];
+
+      function test(name, fn) {
+        try {
+          fn();
+          results.push({ name, ok: true });
+        } catch (e) {
+          results.push({ name, ok: false, error: String(e && e.message ? e.message : e) });
+        }
+      }
+
+      function eq(actual, expected, what) {
+        if (actual !== expected) {
+          throw new Error((what || "value") + ": expected " + JSON.stringify(expected) +
+                          ", got " + JSON.stringify(actual));
+        }
+      }
+
+      function ok(cond, what) {
+        if (!cond) throw new Error(what || "expected truthy");
+      }
+
+      /// Renders a value the way the app does - interpolated into an
+      /// attribute - and reports what the parser actually built.
+      function renderIntoAttribute(value) {
+        const host = document.createElement("div");
+        host.innerHTML = '<a href="#" data-url="' + escapeHtml(value) + '" class="row-url">link</a>';
+        return host;
+      }
+
+      test("escapes the five characters that matter", () => {
+        eq(escapeHtml("&"), "&amp;");
+        eq(escapeHtml("<"), "&lt;");
+        eq(escapeHtml(">"), "&gt;");
+        eq(escapeHtml('"'), "&quot;");
+        eq(escapeHtml("'"), "&#39;");
+      });
+
+      test("leaves ordinary text alone", () => {
+        eq(escapeHtml("Amazon"), "Amazon");
+        eq(escapeHtml("Software Engineer, Level 4"), "Software Engineer, Level 4");
+        eq(escapeHtml("https://example.com/jobs/123?x=1"), "https://example.com/jobs/123?x=1");
+      });
+
+      test("handles null, undefined and non-strings", () => {
+        eq(escapeHtml(null), "");
+        eq(escapeHtml(undefined), "");
+        eq(escapeHtml(""), "");
+        eq(escapeHtml(0), "0");
+        eq(escapeHtml(42), "42");
+      });
+
+      test("escapes the ampersand first, so escapes aren't double-encoded oddly", () => {
+        // "&lt;" typed literally by a user must survive as visible text.
+        eq(escapeHtml("&lt;"), "&amp;lt;");
+      });
+
+      // ---- the actual attack shapes ----
+
+      test("a quote in a value cannot open a new attribute", () => {
+        const hostile = 'https://x.test/" onmouseover="alert(1)" data-x="';
+        const host = renderIntoAttribute(hostile);
+        const a = host.querySelector("a");
+        ok(a, "the anchor should still parse");
+        eq(a.hasAttribute("onmouseover"), false, "no event handler may be injected");
+        eq(a.hasAttribute("data-x"), false, "no extra attribute may be injected");
+        eq(a.dataset.url, hostile, "the value survives intact as data");
+      });
+
+      test("a single quote cannot break a single-quoted attribute", () => {
+        const host = document.createElement("div");
+        host.innerHTML = "<a data-url='" + escapeHtml("x' onmouseover='alert(1)") + "'>l</a>";
+        eq(host.querySelector("a").hasAttribute("onmouseover"), false);
+      });
+
+      test("markup in a value cannot become an element", () => {
+        const host = document.createElement("div");
+        host.innerHTML = "<td>" + escapeHtml('<img src=x onerror="alert(1)">') + "</td>";
+        eq(host.querySelectorAll("img").length, 0, "no element may be created");
+        eq(host.textContent, '<img src=x onerror="alert(1)">', "it renders as literal text");
+      });
+
+      test("a value cannot close the tag it sits in", () => {
+        const host = renderIntoAttribute('"></a><script>window.__x=1<\/script><a data-url="');
+        eq(host.querySelectorAll("script").length, 0, "no script element may be created");
+        eq(host.querySelectorAll("a").length, 1, "the markup shape is unchanged");
+      });
+
+      test("a company name with quotes and ampersands renders as written", () => {
+        const host = document.createElement("div");
+        host.innerHTML = "<td>" + escapeHtml("O'Brien & Sons \"Ltd\"") + "</td>";
+        eq(host.textContent, "O'Brien & Sons \"Ltd\"");
+      });
+
+      // ---- report ----
+
+      const failed = results.filter((r) => !r.ok);
+      const summary = document.getElementById("summary");
+      summary.textContent = failed.length === 0
+        ? "All " + results.length + " tests passed."
+        : failed.length + " of " + results.length + " tests FAILED.";
+      summary.className = failed.length === 0 ? "pass" : "fail";
+      document.title = (failed.length === 0 ? "PASS " : "FAIL ") + (results.length - failed.length) + "/" + results.length;
+      document.getElementById("results").innerHTML = results
+        .map((r) => '<li class="' + (r.ok ? "pass" : "fail") + '">' +
+                    (r.ok ? "PASS" : "FAIL") + " - " + r.name +
+                    (r.ok ? "" : "<br>&nbsp;&nbsp;&nbsp;&nbsp;" + r.error) + "</li>")
+        .join("");
+      window.__testResults = { total: results.length, failed: failed.length, results };
+    })();
+  </script>
+</body>
+</html>

@@ -197,6 +197,7 @@
         doc.querySelectorAll("script").forEach((s) => s.remove());
         document.getElementById("app-frame").innerHTML = doc.body.innerHTML;
 
+        await loadScript("../src/format.js");
         await loadScript("../src/stats.js");
         await loadScript("../src/calendar.js");
         await loadScript("../src/app.js");

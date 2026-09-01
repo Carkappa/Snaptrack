@@ -65,7 +65,7 @@ jobs:
           chrome_args="--headless=new --disable-gpu --no-sandbox --virtual-time-budget=10000"
 
           failed=0
-          for page in calendar stats; do
+          for page in calendar stats format; do
             google-chrome $chrome_args --dump-dom "http://127.0.0.1:8000/tests/$page.test.html" > "$page.html"
             if grep -qE 'All [0-9]+ tests passed' "$page.html"; then
               echo "$page: $(grep -oE 'All [0-9]+ tests passed' "$page.html")"

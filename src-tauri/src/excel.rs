@@ -35,6 +35,35 @@ fn cell_to_string(cell: Option<&Data>) -> String {
     }
 }
 
+/// Excel stores a real date as a day count from its epoch, so a cell the
+/// user formatted as a Date in Excel comes back as a bare number rather than
+/// anything readable. Everything downstream - the Date column, the calendar,
+/// the CSV - expects `YYYY-MM-DD`, so date columns go through here.
+///
+/// The epoch is 1899-12-30 rather than 12-31: Excel treats 1900 as a leap
+/// year, and starting a day early absorbs that phantom day for every date
+/// after 1900-03-01, which is every date an application can carry.
+fn excel_serial_to_iso(serial: f64) -> Option<String> {
+    let base = chrono::NaiveDate::from_ymd_opt(1899, 12, 30)?;
+    let date = base.checked_add_signed(chrono::Duration::try_days(serial.trunc() as i64)?)?;
+    Some(date.format("%Y-%m-%d").to_string())
+}
+
+/// Like `cell_to_string`, but for the two date columns: a genuinely
+/// date-typed cell is rendered as `YYYY-MM-DD` instead of a serial number.
+/// Anything already stored as text (which is what this app itself writes) is
+/// passed through untouched.
+fn cell_to_date_string(cell: Option<&Data>) -> String {
+    match cell {
+        Some(Data::DateTime(dt)) => {
+            excel_serial_to_iso(dt.as_f64()).unwrap_or_else(|| cell_to_string(cell))
+        }
+        // Some producers write an ISO timestamp instead; keep the date half.
+        Some(Data::DateTimeIso(s)) => s.split('T').next().unwrap_or(s).trim().to_string(),
+        _ => cell_to_string(cell),
+    }
+}
+
 fn cell_to_option(cell: Option<&Data>) -> Option<String> {
     let s = cell_to_string(cell);
     if s.trim().is_empty() {
@@ -75,7 +104,7 @@ pub fn read_applications(path: &Path) -> Result<Vec<JobApplication>, String> {
             continue;
         }
         let app = JobApplication {
-            date_applied: cell_to_string(row.first()),
+            date_applied: cell_to_date_string(row.first()),
             company: cell_to_string(row.get(1)),
             position: cell_to_string(row.get(2)),
             location: cell_to_option(row.get(3)),
@@ -90,7 +119,7 @@ pub fn read_applications(path: &Path) -> Result<Vec<JobApplication>, String> {
                     s
                 }
             },
-            last_updated: cell_to_string(row.get(8)),
+            last_updated: cell_to_date_string(row.get(8)),
             job_id: cell_to_option(row.get(9)),
             url: cell_to_option(row.get(10)),
             notes: cell_to_option(row.get(11)),
@@ -511,5 +540,61 @@ mod tests {
         assert!(lines.next().unwrap().contains("Globex"));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn excel_serial_dates_convert_to_iso() {
+        // Known anchors: 1 = 1899-12-31 under Excel's off-by-one epoch,
+        // 45000 = 2023-03-15, 46266 = 2026-09-01.
+        assert_eq!(excel_serial_to_iso(46266.0).unwrap(), "2026-09-01");
+        assert_eq!(excel_serial_to_iso(45000.0).unwrap(), "2023-03-15");
+        // A date cell carrying a time of day keeps only the day.
+        assert_eq!(excel_serial_to_iso(46266.75).unwrap(), "2026-09-01");
+    }
+
+    /// A user can format the Date Applied column as a Date in Excel - or type
+    /// a date into a fresh cell, which Excel converts on their behalf. The
+    /// cell then holds a day count, not text, and everything downstream
+    /// (the Date column, the calendar, the CSV) needs `YYYY-MM-DD`.
+    #[test]
+    fn a_date_typed_cell_reads_back_as_an_iso_date() {
+        let dir = std::env::temp_dir().join(format!(
+            "job-tracker-datecell-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("DateTyped.xlsx");
+        let _ = std::fs::remove_file(&path);
+
+        // Build a workbook by hand with a real date-formatted cell, the way
+        // Excel would leave it - not the string this app writes.
+        {
+            let mut workbook = Workbook::new();
+            let sheet = workbook.add_worksheet();
+            sheet.set_name(SHEET_NAME).unwrap();
+            for (col, header) in HEADERS.iter().enumerate() {
+                sheet.write_string(0, col as u16, *header).unwrap();
+            }
+            let date_format = Format::new().set_num_format("yyyy-mm-dd");
+            let applied = rust_xlsxwriter::ExcelDateTime::from_ymd(2026, 9, 1).unwrap();
+            let updated = rust_xlsxwriter::ExcelDateTime::from_ymd(2026, 9, 15).unwrap();
+            sheet.write_datetime_with_format(1, 0, &applied, &date_format).unwrap();
+            sheet.write_string(1, 1, "Amazon").unwrap();
+            sheet.write_string(1, 2, "SDE Intern").unwrap();
+            sheet.write_string(1, 7, "Applied").unwrap();
+            sheet.write_datetime_with_format(1, 8, &updated, &date_format).unwrap();
+            workbook.save(&path).unwrap();
+        }
+
+        let rows = read_applications(&path).expect("a hand-formatted workbook should still read");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].date_applied, "2026-09-01",
+            "a date-typed cell must not come back as a serial number"
+        );
+        assert_eq!(rows[0].last_updated, "2026-09-15");
+        assert_eq!(rows[0].company, "Amazon");
+
+        let _ = std::fs::remove_file(&path);
     }
 }

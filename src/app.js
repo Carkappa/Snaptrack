@@ -54,7 +54,6 @@
 
     searchBox: el("search-box"),
     listStatus: el("list-status"),
-    listStats: el("list-stats"),
     exportCsvBtn: el("export-csv-btn"),
     tbody: el("applications-tbody"),
     sortHeaders: Array.from(document.querySelectorAll("#applications-table th.sortable")),
@@ -531,11 +530,7 @@
 
   // ---------- List tab ----------
 
-  function escapeHtml(s) {
-    const div = document.createElement("div");
-    div.textContent = s == null ? "" : s;
-    return div.innerHTML;
-  }
+  const { escapeHtml } = window.JobTrackerFormat;
 
   /// Class carrying a status's colour. Unknown statuses - someone typed into
   /// the Status cell - share one fallback colour rather than going invisible.

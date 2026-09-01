@@ -36,9 +36,9 @@ cd src-tauri && cargo test          # Rust: unit + integration
 python3 -m http.server 8000         # then open the pages below
 ```
 
-- `tests/calendar.test.html` and `tests/stats.test.html` — pure-logic tests
-  for `src/calendar.js` and `src/stats.js`. Page title reads `PASS n/n`.
-  **Both run in CI** in headless Chrome.
+- `tests/calendar.test.html`, `tests/stats.test.html`, `tests/format.test.html`
+  — pure-logic tests for the matching `src/` module. Page title reads
+  `PASS n/n`. **All run in CI** in headless Chrome.
 - `tests/ui-harness.html` — the real `index.html` and `app.js` with
   `window.__TAURI__` mocked. Every tab, form, and flow is clickable without
   building the app. Drive it from the browser console or a browser tool;
@@ -86,6 +86,14 @@ about what a status looks like.
 - **Updates are unsigned until a key exists.** `tauri.conf.json` carries a
   placeholder `pubkey`; `updates.rs` detects it and reports that plainly
   instead of failing with a signature error. See the README for the setup.
+- **Escape through `format.js`, never `textContent`/`innerHTML`.** That trick
+  leaves quotes unescaped, which is fine between tags and an attribute
+  injection inside `attr="..."`. Every value rendered here came off a
+  screenshot, an OCR pass, or a spreadsheet cell.
+- **Dates in the workbook may not be text.** The app writes `YYYY-MM-DD`
+  strings, but a user can format the column as a Date in Excel, and calamine
+  then hands back a serial number. `cell_to_date_string` in `excel.rs` is the
+  only correct way to read the two date columns.
 - **Browsers cache the test pages hard.** All three carry a `no-store` meta
   and the harness cache-busts its own sub-resources. Without that, an edit to
   `app.js` or `styles.css` shows up as a phantom bug in the code you just
