@@ -80,6 +80,16 @@
     settingsChoosePath: el("settings-choose-path"),
     settingsPathMessage: el("settings-path-message"),
     settingsHotkey: el("settings-hotkey"),
+    settingsVersion: el("settings-version"),
+    settingsUpdateCheck: el("settings-update-check"),
+    settingsCheckUpdate: el("settings-check-update"),
+    settingsUpdateMessage: el("settings-update-message"),
+
+    updateBanner: el("update-banner"),
+    updateVersion: el("update-version"),
+    updateNotes: el("update-notes"),
+    updateInstall: el("update-install"),
+    updateLater: el("update-later"),
 
     retryToast: el("retry-toast"),
     retryMessage: el("retry-message"),
@@ -829,6 +839,88 @@
     }
   });
 
+  // ---------- Updates ----------
+
+  function showSettingsUpdateMessage(message) {
+    dom.settingsUpdateMessage.hidden = false;
+    dom.settingsUpdateMessage.textContent = message;
+  }
+
+  function showUpdateBanner(result) {
+    dom.updateVersion.textContent = result.version;
+    dom.updateNotes.textContent = (result.notes || "").trim();
+    dom.updateNotes.hidden = !dom.updateNotes.textContent;
+    dom.updateBanner.hidden = false;
+  }
+
+  /// `force` is what the Settings tab's "Check now" passes: it bypasses both
+  /// the once-a-day throttle and the automatic-checks preference. The startup
+  /// call leaves it false, so a user who turned checks off is never contacted.
+  async function checkForUpdate(force) {
+    const result = await invoke("check_for_update", { force });
+    if (result.outcome === "Available") {
+      showUpdateBanner(result);
+    }
+    return result;
+  }
+
+  dom.updateLater.addEventListener("click", () => {
+    dom.updateBanner.hidden = true;
+  });
+
+  dom.updateInstall.addEventListener("click", async () => {
+    dom.updateInstall.disabled = true;
+    dom.updateInstall.textContent = "Downloading…";
+    try {
+      // Succeeds by never returning - the app restarts into the new version.
+      await invoke("install_update");
+    } catch (e) {
+      dom.updateInstall.disabled = false;
+      dom.updateInstall.textContent = "Install & restart";
+      showRetryToast(`Update failed: ${e}`, () => dom.updateInstall.click());
+    }
+  });
+
+  dom.settingsCheckUpdate.addEventListener("click", async () => {
+    dom.settingsCheckUpdate.disabled = true;
+    showSettingsUpdateMessage("Checking…");
+    try {
+      const result = await checkForUpdate(true);
+      if (result.outcome === "Available") {
+        showSettingsUpdateMessage(`Version ${result.version} is available - see the banner at the top.`);
+      } else if (result.outcome === "UpToDate") {
+        showSettingsUpdateMessage("You're on the latest version.");
+      } else {
+        showSettingsUpdateMessage(result.reason);
+      }
+    } catch (e) {
+      showSettingsUpdateMessage(String(e));
+    } finally {
+      dom.settingsCheckUpdate.disabled = false;
+    }
+  });
+
+  dom.settingsUpdateCheck.addEventListener("change", async () => {
+    try {
+      await invoke("set_update_check_enabled", { enabled: dom.settingsUpdateCheck.checked });
+    } catch (e) {
+      showSettingsUpdateMessage(String(e));
+    }
+  });
+
+  async function loadUpdateSettings() {
+    try {
+      dom.settingsVersion.textContent = await invoke("get_app_version");
+    } catch (_) {
+      dom.settingsVersion.textContent = "unknown";
+    }
+    try {
+      dom.settingsUpdateCheck.checked = await invoke("get_update_check_enabled");
+    } catch (_) {
+      dom.settingsUpdateCheck.checked = true;
+    }
+  }
+
   // ---------- Global hotkey / Esc ----------
 
   document.addEventListener("keydown", (e) => {
@@ -853,6 +945,10 @@
     await checkFirstRunSetup();
     await refreshApiKeyStatus();
     await refreshExcelPath();
+    await loadUpdateSettings();
+    // One check on startup, throttled and opt-out-able in Rust. A failure
+    // here (offline, endpoint down) must never block using the app.
+    checkForUpdate(false).catch(() => {});
   }
 
   init();

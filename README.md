@@ -9,6 +9,8 @@ for you — reviewed and saved straight into an Excel workbook.
 - **Vanilla HTML/CSS/JS** frontend — no React, no bundler, no `npm install`
 - No background polling, no timers, no server process. The app is inert
   until you invoke it via the tray icon or the global hotkey.
+- **Updates itself.** One check on launch, at most once a day, and
+  nothing installs until you click. Switch it off in Settings.
 - Ships as a macOS `.dmg` and a Windows `.msi`/`.exe`.
 
 ## How it works
@@ -132,6 +134,7 @@ src-tauri/            Rust backend (the actual application logic)
     extraction.rs      Anthropic API call + JSON parsing (with tests)
     local_ocr.rs         Tesseract-backed extraction + layout heuristics (with tests)
     excel.rs            xlsx read/write, CSV export, timestamped backups (with tests)
+    updates.rs          Update checking + install via tauri-plugin-updater (with tests)
     keychain.rs         API key storage via the keyring crate
     models.rs            Shared data types
   capabilities/         Tauri v2 permission grants for the main window
@@ -142,7 +145,7 @@ src/                    Frontend — plain index.html + styles.css + app.js
 tests/                  Browser-run frontend tests (no npm, no runner)
   calendar.test.html     Pure-logic tests for src/calendar.js
   ui-harness.html        The real UI with the Tauri bridge mocked, for clicking through
-.github/workflows/      CI that builds the macOS + Windows installers
+.github/workflows/      CI: cargo test on every push, installers on a version tag
 ```
 
 ## Prerequisites
@@ -179,12 +182,16 @@ cd src-tauri
 cargo test
 ```
 
+This also runs on every push and pull request — see
+`.github/workflows/test.yml`.
+
 Covers: stripping ```` ``` ```` fences from Claude's response, parsing
 (and gracefully failing to parse) extracted JSON, the Tesseract
 layout-heuristic field guesser (largest text = title, line above it =
 company, regex-based location/salary/job-ID/date detection), the Excel
 read/write round-trip, CSV export, timestamped backups and pruning,
-and duplicate-key matching (case-insensitive, trimmed). A separate
+duplicate-key matching (case-insensitive, trimmed), and the
+once-a-day update-check throttle. A separate
 `tests/full_pipeline.rs` integration suite drives the real
 `#[tauri::command]` functions (not just internal modules) against a
 temporary workbook, including unzipping the saved `.xlsx` to confirm
@@ -266,6 +273,71 @@ Change the path from the Settings tab at any time.
   above the Applications list, computed from what's already loaded.
 - **Calendar.** A month grid shading each day by how many applications
   went out that day, so a slow week is visible at a glance. See below.
+- **Automatic updates.** A banner appears when a newer release is out;
+  one click installs it and restarts. See below.
+
+## Automatic updates
+
+Installed copies check GitHub Releases for a newer version and offer to
+install it in place. This keeps the app's "no background work" promise:
+
+- **One check per launch, at most one a day.** No timer, no polling.
+  The check is a single HTTPS request made when the window initialises,
+  and it's skipped entirely if one already went out in the last 24
+  hours.
+- **Nothing installs on its own.** A new version shows up as a banner
+  above the tabs with its release notes. **Install & restart** downloads
+  it, verifies the signature, installs, and relaunches; **Later**
+  dismisses the banner until the next launch.
+- **Off switch.** Settings → Updates has a "Check for a new version on
+  launch" checkbox and a **Check now** button. Unchecking it stops the
+  automatic check; **Check now** still works when you ask for it.
+- **Failures are inert.** Offline, endpoint down, or updates not
+  configured — the check fails quietly and the app carries on. A failed
+  *install* surfaces the same retry toast as a failed save.
+
+### Setting it up (repo owner, one time)
+
+Updates are signed, so the app will only install a build that came from
+your private key. Until that key exists, the app reports "no update
+signing key configured" instead of checking, and everything else works
+normally.
+
+1. Generate a keypair (keep the passphrase somewhere safe):
+
+   ```bash
+   cd src-tauri
+   cargo tauri signer generate -w ~/.tauri/snaptrack.key
+   ```
+
+2. Paste the **public** key it prints into `src-tauri/tauri.conf.json`,
+   replacing `REPLACE_WITH_YOUR_TAURI_PUBLIC_KEY` under
+   `plugins.updater.pubkey`. This one is meant to be committed.
+
+3. Add two repository secrets (Settings → Secrets and variables →
+   Actions) so CI can sign each release:
+
+   | Secret | Value |
+   | --- | --- |
+   | `TAURI_SIGNING_PRIVATE_KEY` | contents of `~/.tauri/snaptrack.key` |
+   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the passphrase you chose |
+
+   Never commit the private key itself.
+
+4. Tag and push a release as usual. The workflow bundles the installers,
+   signs them, and attaches a `latest.json` manifest — which is what the
+   endpoint in `tauri.conf.json` points at:
+
+   ```
+   https://github.com/Carkappa/Snaptrack/releases/latest/download/latest.json
+   ```
+
+**The release has to be published, not left as a draft.** The workflow
+creates releases as drafts on purpose so you can check the artifacts
+first; GitHub doesn't serve draft assets, so installed apps see nothing
+until you hit Publish. Bump `version` in both `tauri.conf.json` and
+`src-tauri/Cargo.toml` before tagging, or the new build won't look newer
+than what's already installed.
 
 ## CI: building both installers automatically
 

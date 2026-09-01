@@ -40,12 +40,21 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts and the latest.json manifest the
+          # installed app polls. Without these two secrets the build still
+          # succeeds, but it produces no update manifest - see the README's
+          # "Automatic updates" section for generating the keypair.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Job Tracker ${{ github.ref_name }}"
           releaseBody: |
             Unsigned build - see the README for the Gatekeeper / SmartScreen
             warnings you'll need to click through on first launch.
+
+            Installed copies pick this up automatically once the release is
+            published (a draft release is not served to the updater).
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

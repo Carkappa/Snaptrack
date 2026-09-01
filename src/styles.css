@@ -641,6 +641,54 @@ main {
   flex: 1;
 }
 
+/* ---------- Update banner ---------- */
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.update-banner-text {
+  flex: 1;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.update-notes {
+  color: var(--muted);
+  font-size: 11.5px;
+  max-height: 34px;
+  overflow: hidden;
+}
+
+.update-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
 /* ---------- Retry toast ---------- */
 
 .retry-toast {

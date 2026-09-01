@@ -4,6 +4,7 @@ mod extraction;
 mod keychain;
 mod local_ocr;
 pub mod models;
+pub mod updates;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -26,6 +27,7 @@ fn show_and_focus_main_window(app: &tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
@@ -113,6 +115,11 @@ pub fn run() {
             commands::set_extraction_method,
             commands::local_ocr_available,
             commands::extract_with_local_ocr,
+            commands::get_app_version,
+            commands::get_update_check_enabled,
+            commands::set_update_check_enabled,
+            commands::check_for_update,
+            commands::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the job tracker application");

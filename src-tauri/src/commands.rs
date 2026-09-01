@@ -1,5 +1,6 @@
 use crate::models::{ExtractionResult, JobApplication, SaveResult};
-use crate::{excel, extraction, keychain};
+use crate::updates::UpdateCheck;
+use crate::{excel, extraction, keychain, updates};
 use base64::Engine;
 use std::path::PathBuf;
 use tauri::Manager;
@@ -9,6 +10,8 @@ const STORE_FILE: &str = "settings.json";
 const EXCEL_PATH_KEY: &str = "excel_path";
 const EXTRACTION_METHOD_KEY: &str = "extraction_method";
 const DEFAULT_EXTRACTION_METHOD: &str = "tesseract";
+const UPDATE_CHECK_ENABLED_KEY: &str = "update_check_enabled";
+const LAST_UPDATE_CHECK_KEY: &str = "last_update_check";
 
 fn default_excel_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
     let docs = app
@@ -396,4 +399,85 @@ pub fn save_screenshot<R: tauri::Runtime>(
         .map_err(|e| format!("Could not save screenshot to '{}': {e}", file_path.display()))?;
 
     Ok(file_path.to_string_lossy().to_string())
+}
+
+/// Whether the app checks for a new release on startup. On by default;
+/// the Settings tab toggles it.
+#[tauri::command]
+pub fn get_update_check_enabled<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<bool, String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    Ok(store
+        .get(UPDATE_CHECK_ENABLED_KEY)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true))
+}
+
+#[tauri::command]
+pub fn set_update_check_enabled<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    enabled: bool,
+) -> Result<(), String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    store.set(UPDATE_CHECK_ENABLED_KEY, serde_json::json!(enabled));
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))
+}
+
+#[tauri::command]
+pub fn get_app_version<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Asks whether a newer release is out. Called once when the window
+/// initialises (throttled to once a day, skipped if the user turned
+/// automatic checks off) and again whenever "Check now" is clicked, which
+/// passes `force` to bypass both.
+#[tauri::command]
+pub async fn check_for_update<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    force: bool,
+) -> Result<UpdateCheck, String> {
+    // Read the settings and drop the store handle before awaiting, so
+    // nothing non-Send is held across the network call.
+    let (enabled, last_check) = {
+        let store = app
+            .store(STORE_FILE)
+            .map_err(|e| format!("Could not open settings store: {e}"))?;
+        let enabled = store
+            .get(UPDATE_CHECK_ENABLED_KEY)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let last_check = store
+            .get(LAST_UPDATE_CHECK_KEY)
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        (enabled, last_check)
+    };
+
+    let result = updates::check(&app, force, enabled, last_check).await?;
+
+    // Only a check that actually went out resets the once-a-day clock.
+    if !matches!(result, UpdateCheck::Skipped { .. }) {
+        let store = app
+            .store(STORE_FILE)
+            .map_err(|e| format!("Could not open settings store: {e}"))?;
+        store.set(
+            LAST_UPDATE_CHECK_KEY,
+            serde_json::json!(chrono::Utc::now().to_rfc3339()),
+        );
+        let _ = store.save();
+    }
+
+    Ok(result)
+}
+
+/// Downloads and installs the pending update, then restarts into it.
+/// Only ever called from the update banner's button.
+#[tauri::command]
+pub async fn install_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    updates::install(&app).await
 }

@@ -53,7 +53,16 @@
       { date_applied: "", company: "Mystery Corp", position: "Unknown Role", location: null, work_type: null, employment_type: null, salary_range: null, status: "Applied", last_updated: "", job_id: null, url: null, notes: "Row with an unreadable date" },
     ];
 
-    const state = { rows: FIXTURES.map((r) => ({ ...r })), calls: [] };
+    const state = {
+      rows: FIXTURES.map((r) => ({ ...r })),
+      calls: [],
+      updateCheckEnabled: true,
+      // Point this at an { outcome: "Available", ... } object to exercise the
+      // update banner: window.__harness.updateResponse = { ... }
+      updateResponse: { outcome: "UpToDate" },
+      installUpdateCalls: 0,
+      installUpdateFails: false,
+    };
 
     const HANDLERS = {
       get_statuses: () => ["Applied", "Interviewing", "Offered", "Rejected", "Ghosted", "Withdrawn"],
@@ -80,6 +89,23 @@
       pick_image_file: () => null,
       pick_excel_path: () => null,
       save_screenshot: () => "screenshot.png",
+      get_app_version: () => "0.1.0",
+      get_update_check_enabled: () => state.updateCheckEnabled,
+      set_update_check_enabled: ({ enabled }) => {
+        state.updateCheckEnabled = enabled;
+        return null;
+      },
+      check_for_update: ({ force }) => {
+        if (!force && !state.updateCheckEnabled) {
+          return { outcome: "Skipped", reason: "Automatic update checks are turned off." };
+        }
+        return state.updateResponse;
+      },
+      install_update: () => {
+        state.installUpdateCalls += 1;
+        if (state.installUpdateFails) throw new Error("Couldn't install the update: network error");
+        return null;
+      },
     };
 
     window.__TAURI__ = {
