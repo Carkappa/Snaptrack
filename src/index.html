@@ -34,6 +34,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab="capture">Capture</button>
       <button class="tab-btn" data-tab="list">Applications</button>
+      <button class="tab-btn" data-tab="calendar">Calendar</button>
       <button class="tab-btn" data-tab="settings">Settings</button>
     </nav>
 
@@ -167,6 +168,39 @@
         </div>
       </section>
 
+      <!-- CALENDAR TAB -->
+      <section id="tab-calendar" class="tab-panel">
+        <div class="cal-toolbar">
+          <button id="cal-prev" class="btn btn-secondary btn-small" aria-label="Previous month">&larr;</button>
+          <h2 id="cal-month-label" class="cal-month-label">&nbsp;</h2>
+          <button id="cal-next" class="btn btn-secondary btn-small" aria-label="Next month">&rarr;</button>
+          <button id="cal-today" class="btn btn-link btn-small">Today</button>
+        </div>
+
+        <div id="cal-stats" class="cal-stats"></div>
+
+        <div class="cal-grid" role="grid" aria-labelledby="cal-month-label">
+          <div class="cal-weekdays" id="cal-weekdays" role="row"></div>
+          <div class="cal-days" id="cal-days"></div>
+        </div>
+
+        <div class="cal-legend">
+          <span>Fewer</span>
+          <i class="cal-swatch level-0"></i>
+          <i class="cal-swatch level-1"></i>
+          <i class="cal-swatch level-2"></i>
+          <i class="cal-swatch level-3"></i>
+          <i class="cal-swatch level-4"></i>
+          <span>More</span>
+        </div>
+
+        <div id="cal-day-detail" class="cal-day-detail">
+          <p class="hint">Click a day to see the applications you sent that day.</p>
+        </div>
+
+        <p id="cal-undated" class="hint" hidden></p>
+      </section>
+
       <!-- SETTINGS TAB -->
       <section id="tab-settings" class="tab-panel">
         <div class="settings-group">
@@ -215,6 +249,7 @@
     <button id="retry-dismiss" class="btn btn-link btn-small">Dismiss</button>
   </div>
 
+  <script src="calendar.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

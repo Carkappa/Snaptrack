@@ -10,6 +10,12 @@
   --danger-bg: #fde8e8;
   --panel: #f5f6f8;
   --radius: 6px;
+  --heat-0: #eceef1;
+  --heat-1: #cfe0fd;
+  --heat-2: #93bbfa;
+  --heat-3: #4c8dff;
+  --heat-4: #1d4ed8;
+  --heat-fg-strong: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,11 +29,25 @@
     --danger: #ff6b6b;
     --danger-bg: #3a1f1f;
     --panel: #2a2b2e;
+    --heat-0: #303236;
+    --heat-1: #24405f;
+    --heat-2: #2d5f9e;
+    --heat-3: #3c81e0;
+    --heat-4: #6ba6ff;
+    --heat-fg-strong: #0a0a0a;
   }
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* The UA's `[hidden] { display: none }` loses to any author rule that sets
+   `display` - which several panels below do - so `hidden` has to be made
+   to stick explicitly, or the setup overlay, capture form, and toasts all
+   show up permanently. */
+[hidden] {
+  display: none !important;
 }
 
 html, body {
@@ -415,6 +435,183 @@ main {
 .status-Interviewing { background: #ffeb9c; color: #443; }
 .status-Rejected { background: #ffc7ce; color: #433; }
 .status-Ghosted { background: #d9d9d9; color: #333; }
+
+/* ---------- Calendar tab ---------- */
+
+.cal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-bottom: 8px;
+}
+
+.cal-month-label {
+  flex: 1;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.cal-stats {
+  color: var(--muted);
+  font-size: 11.5px;
+  margin-bottom: 8px;
+  min-height: 15px;
+}
+
+.cal-grid {
+  flex-shrink: 0;
+}
+
+.cal-weekdays,
+.cal-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.cal-weekdays {
+  margin-bottom: 3px;
+}
+
+.cal-weekdays span {
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cal-day {
+  position: relative;
+  /* Deliberately not square: at the window's 480x600 minimum, square
+     cells push the day list off the bottom of the panel. */
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 2px;
+  font-family: inherit;
+}
+
+.cal-day .cal-day-number {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.cal-day .cal-day-count {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cal-day.outside {
+  color: var(--muted);
+  opacity: 0.45;
+  cursor: default;
+}
+
+.cal-day.level-1 { background: var(--heat-1); }
+.cal-day.level-2 { background: var(--heat-2); }
+.cal-day.level-3 { background: var(--heat-3); color: var(--heat-fg-strong); }
+.cal-day.level-4 { background: var(--heat-4); color: var(--heat-fg-strong); }
+
+.cal-day.has-apps:hover {
+  filter: brightness(1.08);
+}
+
+.cal-day.today {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+.cal-day.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.cal-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 8px 0;
+  font-size: 10.5px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.cal-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  display: inline-block;
+}
+
+.cal-swatch.level-0 { background: var(--heat-0); }
+.cal-swatch.level-1 { background: var(--heat-1); }
+.cal-swatch.level-2 { background: var(--heat-2); }
+.cal-swatch.level-3 { background: var(--heat-3); }
+.cal-swatch.level-4 { background: var(--heat-4); }
+
+.cal-day-detail {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 110px;
+}
+
+.cal-day-detail h3 {
+  font-size: 12.5px;
+  margin: 0 0 6px;
+}
+
+.cal-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 6px 2px;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.cal-entry:hover {
+  background: var(--panel);
+}
+
+.cal-entry .cal-entry-company {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cal-entry .cal-entry-position {
+  flex: 1;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-entry .cal-entry-status {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
 
 /* ---------- Settings tab ---------- */
 

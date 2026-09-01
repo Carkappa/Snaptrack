@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Tracker UI harness</title>
+  <link rel="stylesheet" href="../src/styles.css" />
+  <style>
+    /* The harness runs the real UI inside a window-sized frame so the
+       layout is the same one the Tauri webview gets. */
+    /* styles.css locks the page to a full-height, non-scrolling window;
+       inside the harness the app lives in a fixed-size box instead. */
+    html, body { height: auto; overflow: auto; margin: 0; }
+    #app-frame .app { height: 100%; }
+    #harness-bar {
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 12px; padding: 6px 10px; background: #111; color: #eee;
+      display: flex; gap: 10px; align-items: center;
+    }
+    #harness-bar b { color: #6ee7b7; }
+    #harness-status { color: #fbbf24; }
+    #app-frame {
+      width: 420px; height: 640px; border: 1px solid #444; margin: 10px;
+      overflow: hidden; position: relative; resize: both;
+    }
+  </style>
+</head>
+<body>
+  <div id="harness-bar">
+    <b>UI harness</b>
+    <span>Real index.html + app.js, with the Tauri bridge mocked.</span>
+    <span id="harness-status">loading&hellip;</span>
+  </div>
+  <div id="app-frame"></div>
+
+  <script>
+    // ---- Mock Tauri bridge -------------------------------------------------
+    //
+    // app.js talks to the Rust side only through `invoke`, so standing in a
+    // fake one lets the whole frontend run in a plain browser. The fixture
+    // rows below are shaped exactly like what `list_applications` returns.
+
+    const FIXTURES = [
+      { date_applied: "2026-09-01", company: "Amazon", position: "Robotics SDE Intern", location: "Westboro, WI", work_type: "On-site", employment_type: "Internship", salary_range: null, status: "Applied", last_updated: "2026-09-01", job_id: "4123456789", url: "https://example.com/1", notes: null },
+      { date_applied: "2026-09-01", company: "Stripe", position: "Backend Engineer", location: "Remote", work_type: "Remote", employment_type: "Full-time", salary_range: "$150k - $190k", status: "Interviewing", last_updated: "2026-09-01", job_id: null, url: null, notes: null },
+      { date_applied: "2026-09-01", company: "Figma", position: "Product Engineer", location: "San Francisco, CA", work_type: "Hybrid", employment_type: "Full-time", salary_range: null, status: "Applied", last_updated: "2026-09-01", job_id: null, url: null, notes: null },
+      { date_applied: "2026-09-01", company: "Linear", position: "Frontend Engineer", location: "Remote", work_type: "Remote", employment_type: "Full-time", salary_range: null, status: "Rejected", last_updated: "2026-09-01", job_id: null, url: null, notes: null },
+      { date_applied: "2026-09-02", company: "Vercel", position: "DX Engineer", location: "Remote", work_type: "Remote", employment_type: "Full-time", salary_range: null, status: "Applied", last_updated: "2026-09-02", job_id: null, url: null, notes: null },
+      { date_applied: "2026-09-02", company: "Notion", position: "Platform Engineer", location: "New York, NY", work_type: "Hybrid", employment_type: "Full-time", salary_range: null, status: "Ghosted", last_updated: "2026-09-02", job_id: null, url: null, notes: null },
+      { date_applied: "2026-09-08", company: "Anthropic", position: "Product Engineer", location: "Seattle, WA", work_type: "Hybrid", employment_type: "Full-time", salary_range: null, status: "Applied", last_updated: "2026-09-08", job_id: null, url: null, notes: null },
+      { date_applied: "2026-09-15", company: "Ramp", position: "Software Engineer", location: "New York, NY", work_type: "On-site", employment_type: "Full-time", salary_range: null, status: "Offered", last_updated: "2026-09-15", job_id: null, url: null, notes: null },
+      { date_applied: "2026-08-27", company: "Datadog", position: "Site Reliability Engineer", location: "Boston, MA", work_type: "Hybrid", employment_type: "Full-time", salary_range: null, status: "Applied", last_updated: "2026-08-27", job_id: null, url: null, notes: null },
+      { date_applied: "", company: "Mystery Corp", position: "Unknown Role", location: null, work_type: null, employment_type: null, salary_range: null, status: "Applied", last_updated: "", job_id: null, url: null, notes: "Row with an unreadable date" },
+    ];
+
+    const state = { rows: FIXTURES.map((r) => ({ ...r })), calls: [] };
+
+    const HANDLERS = {
+      get_statuses: () => ["Applied", "Interviewing", "Offered", "Rejected", "Ghosted", "Withdrawn"],
+      has_api_key: () => true,
+      get_extraction_method: () => "tesseract",
+      set_extraction_method: () => null,
+      local_ocr_available: () => false,
+      get_excel_path: () => "C:\\Users\\you\\Documents\\JobApplications.xlsx",
+      list_applications: () => state.rows.map((r) => ({ ...r })),
+      export_csv: () => "C:\\Users\\you\\Documents\\JobApplications.csv",
+      save_application: ({ application }) => {
+        state.rows.push({ ...application });
+        return { outcome: "Saved" };
+      },
+      update_status_at_index: ({ index, status }) => {
+        state.rows[index].status = status;
+        return null;
+      },
+      update_application_at_index: ({ index, application }) => {
+        state.rows[index] = { ...application };
+        return null;
+      },
+      read_clipboard_image: () => null,
+      pick_image_file: () => null,
+      pick_excel_path: () => null,
+      save_screenshot: () => "screenshot.png",
+    };
+
+    window.__TAURI__ = {
+      core: {
+        invoke: async (cmd, args) => {
+          state.calls.push({ cmd, args });
+          const handler = HANDLERS[cmd];
+          if (!handler) throw new Error("harness: no mock for command '" + cmd + "'");
+          return handler(args || {});
+        },
+      },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ hide: () => { state.calls.push({ cmd: "window.hide" }); } }) },
+    };
+    window.__harness = state;
+
+    // ---- Load the real UI --------------------------------------------------
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error("failed to load " + src));
+        document.body.appendChild(s);
+      });
+    }
+
+    (async () => {
+      const status = document.getElementById("harness-status");
+      try {
+        const html = await fetch("../src/index.html").then((r) => r.text());
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        doc.querySelectorAll("script").forEach((s) => s.remove());
+        document.getElementById("app-frame").innerHTML = doc.body.innerHTML;
+
+        await loadScript("../src/calendar.js");
+        await loadScript("../src/app.js");
+        status.textContent = "ready";
+        status.style.color = "#6ee7b7";
+      } catch (e) {
+        status.textContent = "harness failed: " + e.message;
+        status.style.color = "#fca5a5";
+      }
+    })();
+  </script>
+</body>
+</html>

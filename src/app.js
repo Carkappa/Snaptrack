@@ -58,6 +58,16 @@
     exportCsvBtn: el("export-csv-btn"),
     tbody: el("applications-tbody"),
 
+    calPrev: el("cal-prev"),
+    calNext: el("cal-next"),
+    calToday: el("cal-today"),
+    calMonthLabel: el("cal-month-label"),
+    calStats: el("cal-stats"),
+    calWeekdays: el("cal-weekdays"),
+    calDays: el("cal-days"),
+    calDayDetail: el("cal-day-detail"),
+    calUndated: el("cal-undated"),
+
     extractionMethodSelect: el("settings-extraction-method"),
     extractionMethodStatus: el("extraction-method-status"),
 
@@ -83,6 +93,12 @@
   let editingIndex = null; // set when editing an existing row from the list tab
   let currentImage = null; // { base64, mediaType } of the screenshot behind the current form, if any
   let currentExtractionMethod = "tesseract";
+
+  const cal = window.JobTrackerCalendar;
+  const calTodayParts = cal.todayParts();
+  let calCursor = { year: calTodayParts.year, month: calTodayParts.month }; // month on screen
+  let calSelectedDay = null; // "YYYY-MM-DD" of the day whose entries are listed
+  let calGroups = { byDate: Object.create(null), undated: [] };
 
   function todayIso() {
     const d = new Date();
@@ -131,7 +147,7 @@
   function activateTab(name) {
     dom.tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === name));
     dom.tabPanels.forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${name}`));
-    if (name === "list") {
+    if (name === "list" || name === "calendar") {
       loadApplications();
     }
   }
@@ -584,6 +600,7 @@
     try {
       allApplications = await invoke("list_applications");
       renderApplicationsTable();
+      renderCalendar();
     } catch (e) {
       dom.listStatus.textContent = `Couldn't load applications: ${e}`;
     }
@@ -598,6 +615,126 @@
     } catch (e) {
       dom.listStatus.textContent = `Couldn't export CSV: ${e}`;
     }
+  });
+
+  // ---------- Calendar tab ----------
+
+  function renderWeekdayHeader() {
+    if (dom.calWeekdays.childElementCount) return;
+    dom.calWeekdays.innerHTML = cal.WEEKDAY_NAMES.map((d) => `<span>${d}</span>`).join("");
+  }
+
+  function renderCalendar() {
+    renderWeekdayHeader();
+    calGroups = cal.groupByDate(allApplications);
+    const { byDate, undated } = calGroups;
+    const { year, month } = calCursor;
+
+    dom.calMonthLabel.textContent = cal.monthLabel(year, month);
+
+    const { weeks } = cal.monthGrid(year, month, byDate, calTodayParts);
+    dom.calDays.innerHTML = weeks
+      .flat()
+      .map((cell) => {
+        const classes = ["cal-day", `level-${cell.level}`];
+        if (!cell.inMonth) classes.push("outside");
+        if (cell.isToday) classes.push("today");
+        if (cell.count > 0) classes.push("has-apps");
+        if (cell.iso === calSelectedDay) classes.push("selected");
+        const label = `${cal.dayLabel(cell.iso)}: ${cell.count} application${cell.count === 1 ? "" : "s"}`;
+        return `<button type="button" class="${classes.join(" ")}" data-iso="${cell.iso}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">
+          <span class="cal-day-number">${cell.day}</span>
+          ${cell.count ? `<span class="cal-day-count">${cell.count}</span>` : ""}
+        </button>`;
+      })
+      .join("");
+
+    const stats = cal.monthStats(year, month, byDate);
+    const streak = cal.currentStreak(byDate, calTodayParts);
+    const parts = [
+      `${stats.total} application${stats.total === 1 ? "" : "s"} this month`,
+      `${stats.activeDays} active day${stats.activeDays === 1 ? "" : "s"}`,
+    ];
+    if (stats.busiest) {
+      parts.push(`busiest ${cal.dayLabel(stats.busiest.iso)} (${stats.busiest.count})`);
+    }
+    if (streak > 0) {
+      parts.push(`${streak}-day streak`);
+    }
+    dom.calStats.textContent = parts.join(" · ");
+
+    if (undated.length > 0) {
+      dom.calUndated.hidden = false;
+      dom.calUndated.textContent = `${undated.length} application${undated.length === 1 ? " has an unreadable Date Applied and isn't" : "s have an unreadable Date Applied and aren't"} shown on the calendar.`;
+    } else {
+      dom.calUndated.hidden = true;
+      dom.calUndated.textContent = "";
+    }
+
+    renderDayDetail();
+  }
+
+  function renderDayDetail() {
+    if (!calSelectedDay) {
+      dom.calDayDetail.innerHTML =
+        '<p class="hint">Click a day to see the applications you sent that day.</p>';
+      return;
+    }
+    const entries = calGroups.byDate[calSelectedDay] || [];
+    if (entries.length === 0) {
+      dom.calDayDetail.innerHTML = `<h3>${escapeHtml(cal.dayLabel(calSelectedDay))}</h3>
+        <p class="hint">No applications on this day.</p>`;
+      return;
+    }
+    dom.calDayDetail.innerHTML =
+      `<h3>${escapeHtml(cal.dayLabel(calSelectedDay))} - ${entries.length} application${entries.length === 1 ? "" : "s"}</h3>` +
+      entries
+        .map(
+          ({ app, index }) => `<button type="button" class="cal-entry" data-index="${index}">
+            <span class="cal-entry-company">${escapeHtml(app.company)}</span>
+            <span class="cal-entry-position">${escapeHtml(app.position)}</span>
+            <span class="cal-entry-status">${escapeHtml(app.status)}</span>
+          </button>`
+        )
+        .join("");
+  }
+
+  dom.calDays.addEventListener("click", (e) => {
+    const cell = e.target.closest(".cal-day");
+    if (!cell) return;
+    const iso = cell.dataset.iso;
+    // Clicking a neighbouring month's day pages there rather than
+    // selecting a day that isn't on screen.
+    const parts = cal.parseDate(iso);
+    if (parts && (parts.year !== calCursor.year || parts.month !== calCursor.month)) {
+      calCursor = { year: parts.year, month: parts.month };
+    }
+    calSelectedDay = calSelectedDay === iso ? null : iso;
+    renderCalendar();
+  });
+
+  dom.calDayDetail.addEventListener("click", (e) => {
+    const entry = e.target.closest(".cal-entry");
+    if (!entry) return;
+    enterEditModeFor(Number(entry.dataset.index));
+  });
+
+  dom.calPrev.addEventListener("click", () => {
+    calCursor = cal.shiftMonth(calCursor.year, calCursor.month, -1);
+    calSelectedDay = null;
+    renderCalendar();
+  });
+
+  dom.calNext.addEventListener("click", () => {
+    calCursor = cal.shiftMonth(calCursor.year, calCursor.month, 1);
+    calSelectedDay = null;
+    renderCalendar();
+  });
+
+  dom.calToday.addEventListener("click", () => {
+    calCursor = { year: calTodayParts.year, month: calTodayParts.month };
+    calSelectedDay = cal.iso(calTodayParts.year, calTodayParts.month, calTodayParts.day);
+    renderCalendar();
   });
 
   // ---------- Settings tab ----------

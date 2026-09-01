@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Calendar logic tests</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 13px; margin: 16px; }
+    #summary { font-weight: 700; font-size: 15px; margin-bottom: 10px; }
+    #summary.pass { color: #15803d; }
+    #summary.fail { color: #b91c1c; }
+    li { margin-bottom: 2px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    li.fail { color: #b91c1c; }
+    li.pass { color: #15803d; }
+  </style>
+</head>
+<body>
+  <h1>Calendar logic tests</h1>
+  <p>Pure-function tests for <code>src/calendar.js</code>. Open this file in a
+     browser and read the summary below.</p>
+  <div id="summary">Running&hellip;</div>
+  <ul id="results"></ul>
+
+  <script src="../src/calendar.js"></script>
+  <script>
+    (() => {
+      "use strict";
+      const cal = window.JobTrackerCalendar;
+      const results = [];
+
+      function test(name, fn) {
+        try {
+          fn();
+          results.push({ name, ok: true });
+        } catch (e) {
+          results.push({ name, ok: false, error: String(e && e.message ? e.message : e) });
+        }
+      }
+
+      function eq(actual, expected, what) {
+        const a = JSON.stringify(actual);
+        const b = JSON.stringify(expected);
+        if (a !== b) throw new Error((what || "value") + ": expected " + b + ", got " + a);
+      }
+
+      function ok(cond, what) {
+        if (!cond) throw new Error(what || "expected truthy");
+      }
+
+      const apps = (rows) => rows.map(([date, company, position, status]) => ({
+        date_applied: date, company, position, status: status || "Applied",
+      }));
+
+      // ---- parseDate ----
+
+      test("parseDate reads the ISO format the app writes", () => {
+        eq(cal.parseDate("2026-09-01"), { year: 2026, month: 9, day: 1 });
+        eq(cal.parseDate("2026-12-31"), { year: 2026, month: 12, day: 31 });
+      });
+
+      test("parseDate tolerates hand-edited separators and US order", () => {
+        eq(cal.parseDate("2026/09/01"), { year: 2026, month: 9, day: 1 });
+        eq(cal.parseDate("9/1/2026"), { year: 2026, month: 9, day: 1 });
+        eq(cal.parseDate("  2026-09-01  "), { year: 2026, month: 9, day: 1 });
+      });
+
+      test("parseDate rejects junk and impossible dates", () => {
+        const bad = ["", "   ", null, undefined, "not a date", "2026-13-01",
+                     "2026-00-10", "2026-02-30", "2026-09-32", "20260901"];
+        for (const value of bad) {
+          eq(cal.parseDate(value), null, "parseDate(" + JSON.stringify(value) + ")");
+        }
+      });
+
+      test("parseDate accepts Feb 29 only in a leap year", () => {
+        eq(cal.parseDate("2024-02-29"), { year: 2024, month: 2, day: 29 });
+        eq(cal.parseDate("2026-02-29"), null);
+      });
+
+      // ---- daysInMonth / firstWeekdayOfMonth ----
+
+      test("daysInMonth handles month lengths and leap years", () => {
+        eq(cal.daysInMonth(2026, 1), 31);
+        eq(cal.daysInMonth(2026, 2), 28);
+        eq(cal.daysInMonth(2024, 2), 29);
+        eq(cal.daysInMonth(2000, 2), 29, "2000 is a leap year");
+        eq(cal.daysInMonth(1900, 2), 28, "1900 is not");
+        eq(cal.daysInMonth(2026, 9), 30);
+        eq(cal.daysInMonth(2026, 12), 31);
+      });
+
+      test("firstWeekdayOfMonth matches known dates", () => {
+        eq(cal.firstWeekdayOfMonth(2026, 9), 2, "1 Sep 2026 is a Tuesday");
+        eq(cal.firstWeekdayOfMonth(2026, 2), 0, "1 Feb 2026 is a Sunday");
+      });
+
+      // ---- groupByDate ----
+
+      test("groupByDate buckets rows and keeps their original indices", () => {
+        const rows = apps([
+          ["2026-09-01", "Amazon", "SDE Intern"],
+          ["2026-09-01", "Stripe", "Backend Engineer"],
+          ["2026-09-03", "Figma", "Product Engineer"],
+        ]);
+        const { byDate, undated } = cal.groupByDate(rows);
+        eq(Object.keys(byDate).sort(), ["2026-09-01", "2026-09-03"]);
+        eq(byDate["2026-09-01"].length, 2);
+        eq(byDate["2026-09-01"].map((e) => e.index), [0, 1], "indices preserved");
+        eq(byDate["2026-09-03"][0].app.company, "Figma");
+        eq(undated.length, 0);
+      });
+
+      test("groupByDate sets aside rows with an unreadable date", () => {
+        const rows = apps([
+          ["2026-09-01", "Amazon", "SDE Intern"],
+          ["", "Ghost Co", "Unknown"],
+          ["whenever", "Vague Inc", "Unknown"],
+        ]);
+        const { byDate, undated } = cal.groupByDate(rows);
+        eq(cal.countOn(byDate, "2026-09-01"), 1);
+        eq(undated.length, 2);
+        eq(undated.map((e) => e.index), [1, 2]);
+      });
+
+      test("groupByDate copes with an empty or missing list", () => {
+        eq(cal.groupByDate([]).undated, []);
+        eq(Object.keys(cal.groupByDate(undefined).byDate), []);
+      });
+
+      test("countOn returns 0 for a day with nothing on it", () => {
+        const { byDate } = cal.groupByDate(apps([["2026-09-01", "Amazon", "SDE"]]));
+        eq(cal.countOn(byDate, "2026-09-02"), 0);
+      });
+
+      // ---- heatLevel ----
+
+      test("heatLevel is 0 only when nothing was sent", () => {
+        eq(cal.heatLevel(0, 10), 0);
+        eq(cal.heatLevel(1, 10), 1);
+      });
+
+      test("heatLevel scales to the busiest day and never exceeds 4", () => {
+        eq(cal.heatLevel(1, 1), 1, "a lone application still shows");
+        eq(cal.heatLevel(8, 8), 4, "the busiest day is the darkest");
+        eq(cal.heatLevel(2, 8), 1);
+        eq(cal.heatLevel(4, 8), 2);
+        eq(cal.heatLevel(6, 8), 3);
+        eq(cal.heatLevel(99, 8), 4, "clamped");
+      });
+
+      // ---- monthGrid ----
+
+      test("monthGrid is always 6 full weeks", () => {
+        const months = [[2026, 9], [2026, 2], [2024, 2], [2026, 8], [2027, 1]];
+        for (const [y, m] of months) {
+          const grid = cal.monthGrid(y, m, Object.create(null), { year: 2026, month: 9, day: 1 });
+          eq(grid.weeks.length, 6, y + "-" + m + " week count");
+          ok(grid.weeks.every((w) => w.length === 7), y + "-" + m + " rows are 7 wide");
+          eq(grid.cells.length, 42, y + "-" + m + " cell count");
+        }
+      });
+
+      test("monthGrid pads with the neighbouring months, flagged as outside", () => {
+        const grid = cal.monthGrid(2026, 9, Object.create(null), { year: 2026, month: 9, day: 1 });
+        // 1 Sep 2026 is a Tuesday, so two leading cells come from August.
+        eq(grid.cells[0].iso, "2026-08-30");
+        eq(grid.cells[0].inMonth, false);
+        eq(grid.cells[1].iso, "2026-08-31");
+        eq(grid.cells[2].iso, "2026-09-01");
+        eq(grid.cells[2].inMonth, true);
+        eq(grid.cells[31].iso, "2026-09-30", "last day of September");
+        eq(grid.cells[32].iso, "2026-10-01");
+        eq(grid.cells[32].inMonth, false);
+        eq(grid.cells[41].iso, "2026-10-10", "grid ends in October");
+      });
+
+      test("monthGrid carries per-day counts and heat levels", () => {
+        const rows = apps([
+          ["2026-09-01", "Amazon", "SDE"],
+          ["2026-09-01", "Stripe", "Backend"],
+          ["2026-09-01", "Figma", "Product"],
+          ["2026-09-01", "Linear", "Frontend"],
+          ["2026-09-05", "Vercel", "DX"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        const grid = cal.monthGrid(2026, 9, byDate, { year: 2026, month: 9, day: 1 });
+        const cell = (iso) => grid.cells.find((c) => c.iso === iso);
+        eq(grid.max, 4, "busiest in-month day");
+        eq(cell("2026-09-01").count, 4);
+        eq(cell("2026-09-01").level, 4);
+        eq(cell("2026-09-05").count, 1);
+        eq(cell("2026-09-05").level, 1);
+        eq(cell("2026-09-02").count, 0);
+        eq(cell("2026-09-02").level, 0);
+      });
+
+      test("monthGrid marks today, and only today", () => {
+        const grid = cal.monthGrid(2026, 9, Object.create(null), { year: 2026, month: 9, day: 15 });
+        eq(grid.cells.filter((c) => c.isToday).map((c) => c.iso), ["2026-09-15"]);
+      });
+
+      test("monthGrid ignores an out-of-month spike when scaling heat", () => {
+        // 31 Aug is only a padding cell in the September grid - it must not
+        // wash out September's own colouring.
+        const rows = apps([
+          ["2026-08-31", "A", "1"], ["2026-08-31", "B", "2"], ["2026-08-31", "C", "3"],
+          ["2026-08-31", "D", "4"], ["2026-08-31", "E", "5"], ["2026-08-31", "F", "6"],
+          ["2026-09-02", "G", "7"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        const grid = cal.monthGrid(2026, 9, byDate, { year: 2026, month: 9, day: 1 });
+        eq(grid.max, 1, "only in-month days scale the heat");
+        const aug31 = grid.cells.find((c) => c.iso === "2026-08-31");
+        eq(aug31.count, 6, "padding cells still report their count");
+        eq(aug31.level, 0, "but are never coloured");
+        eq(grid.cells.find((c) => c.iso === "2026-09-02").level, 1);
+      });
+
+      // ---- monthStats ----
+
+      test("monthStats totals only the month on screen", () => {
+        const rows = apps([
+          ["2026-08-31", "August Co", "Ignored"],
+          ["2026-09-01", "Amazon", "SDE"],
+          ["2026-09-01", "Stripe", "Backend"],
+          ["2026-09-04", "Figma", "Product"],
+          ["2026-10-01", "October Co", "Ignored"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        const stats = cal.monthStats(2026, 9, byDate);
+        eq(stats.total, 3);
+        eq(stats.activeDays, 2);
+        eq(stats.busiest, { iso: "2026-09-01", day: 1, count: 2 });
+      });
+
+      test("monthStats reports an empty month cleanly", () => {
+        const stats = cal.monthStats(2026, 1, Object.create(null));
+        eq(stats, { total: 0, activeDays: 0, busiest: null });
+      });
+
+      test("monthStats keeps the earliest day when two days tie", () => {
+        const rows = apps([
+          ["2026-09-02", "A", "1"], ["2026-09-02", "B", "2"],
+          ["2026-09-09", "C", "3"], ["2026-09-09", "D", "4"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        eq(cal.monthStats(2026, 9, byDate).busiest.iso, "2026-09-02");
+      });
+
+      // ---- currentStreak ----
+
+      test("currentStreak counts consecutive days back from today", () => {
+        const rows = apps([
+          ["2026-09-15", "A", "1"], ["2026-09-14", "B", "2"], ["2026-09-13", "C", "3"],
+          ["2026-09-11", "D", "4"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        eq(cal.currentStreak(byDate, { year: 2026, month: 9, day: 15 }), 3);
+      });
+
+      test("currentStreak survives a today with nothing sent yet", () => {
+        const rows = apps([["2026-09-14", "A", "1"], ["2026-09-13", "B", "2"]]);
+        const { byDate } = cal.groupByDate(rows);
+        eq(cal.currentStreak(byDate, { year: 2026, month: 9, day: 15 }), 2);
+      });
+
+      test("currentStreak is 0 once the gap is two days", () => {
+        const rows = apps([["2026-09-13", "A", "1"]]);
+        const { byDate } = cal.groupByDate(rows);
+        eq(cal.currentStreak(byDate, { year: 2026, month: 9, day: 15 }), 0);
+        eq(cal.currentStreak(Object.create(null), { year: 2026, month: 9, day: 15 }), 0);
+      });
+
+      test("currentStreak walks back across a month boundary", () => {
+        const rows = apps([
+          ["2026-09-01", "A", "1"], ["2026-08-31", "B", "2"], ["2026-08-30", "C", "3"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        eq(cal.currentStreak(byDate, { year: 2026, month: 9, day: 1 }), 3);
+      });
+
+      // ---- shiftMonth / labels ----
+
+      test("shiftMonth wraps the year in both directions", () => {
+        eq(cal.shiftMonth(2026, 9, 1), { year: 2026, month: 10 });
+        eq(cal.shiftMonth(2026, 12, 1), { year: 2027, month: 1 });
+        eq(cal.shiftMonth(2026, 1, -1), { year: 2025, month: 12 });
+        eq(cal.shiftMonth(2026, 9, -12), { year: 2025, month: 9 });
+        eq(cal.shiftMonth(2026, 9, 15), { year: 2027, month: 12 });
+      });
+
+      test("labels read the way a person would say them", () => {
+        eq(cal.monthLabel(2026, 9), "September 2026");
+        eq(cal.monthLabel(2026, 1), "January 2026");
+        eq(cal.dayLabel("2026-09-01"), "1 September 2026");
+        eq(cal.dayLabel("garbage"), "garbage", "falls back to the raw value");
+      });
+
+      test("iso zero-pads month and day", () => {
+        eq(cal.iso(2026, 9, 1), "2026-09-01");
+        eq(cal.iso(2026, 12, 31), "2026-12-31");
+      });
+
+      test("iso and parseDate round-trip every day of a year", () => {
+        for (let m = 1; m <= 12; m++) {
+          for (let d = 1; d <= cal.daysInMonth(2026, m); d++) {
+            const s = cal.iso(2026, m, d);
+            eq(cal.parseDate(s), { year: 2026, month: m, day: d }, s);
+          }
+        }
+      });
+
+      test("weekday header has 7 names starting on Sunday", () => {
+        eq(cal.WEEKDAY_NAMES.length, 7);
+        eq(cal.WEEKDAY_NAMES[0], "Sun");
+      });
+
+      // ---- report ----
+
+      const failed = results.filter((r) => !r.ok);
+      const summary = document.getElementById("summary");
+      summary.textContent = failed.length === 0
+        ? "All " + results.length + " tests passed."
+        : failed.length + " of " + results.length + " tests FAILED.";
+      summary.className = failed.length === 0 ? "pass" : "fail";
+      document.title = (failed.length === 0 ? "PASS " : "FAIL ") + (results.length - failed.length) + "/" + results.length;
+      document.getElementById("results").innerHTML = results
+        .map((r) => '<li class="' + (r.ok ? "pass" : "fail") + '">' +
+                    (r.ok ? "PASS" : "FAIL") + " - " + r.name +
+                    (r.ok ? "" : "<br>&nbsp;&nbsp;&nbsp;&nbsp;" + r.error) + "</li>")
+        .join("");
+      window.__testResults = { total: results.length, failed: failed.length, results };
+    })();
+  </script>
+</body>
+</html>

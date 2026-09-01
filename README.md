@@ -25,6 +25,32 @@ for you — reviewed and saved straight into an Excel workbook.
 No screenshot? Click **Skip screenshot** for a blank form — the app is
 fully usable with zero API calls and zero setup.
 
+## The calendar
+
+The **Calendar** tab turns the workbook into a month grid: each day
+carries the number of applications saved with that Date Applied, shaded
+from pale to solid against the busiest day of the month on screen — so
+a productive week and a quiet one are distinguishable without reading a
+single row.
+
+- Arrows page month to month, **Today** jumps back and selects today.
+- Clicking a day lists that day's applications underneath; clicking one
+  of those opens it in the edit form, the same as clicking a row in the
+  Applications tab.
+- Above the grid: the month's total, how many days you were active,
+  your busiest day, and the current run of consecutive days with at
+  least one application out.
+- Days from the neighbouring months fill out the first and last weeks.
+  They're greyed, never shaded, and don't skew the month's colour
+  scale; clicking one pages to that month.
+
+The counts come from the Date Applied column, which is the date the
+capture was saved — so screenshots captured and saved on the day you
+applied land on the right square with no extra bookkeeping. Rows whose
+date can't be read (hand-edited to something odd, or left blank) are
+counted out and reported in a line under the grid rather than silently
+dropped.
+
 ## Extraction methods
 
 Switch between these anytime in Settings — no restart needed:
@@ -112,6 +138,10 @@ src-tauri/            Rust backend (the actual application logic)
   icons/                 App icons (.icns / .ico / .png)
   tauri.conf.json         Window, bundle, and tray configuration
 src/                    Frontend — plain index.html + styles.css + app.js
+    calendar.js           Date math + per-day aggregation behind the Calendar tab
+tests/                  Browser-run frontend tests (no npm, no runner)
+  calendar.test.html     Pure-logic tests for src/calendar.js
+  ui-harness.html        The real UI with the Tauri bridge mocked, for clicking through
 .github/workflows/      CI that builds the macOS + Windows installers
 ```
 
@@ -173,6 +203,25 @@ OCR_TEST_IMAGE=/path/to/screenshot.png \
   cargo test --test full_pipeline -- --ignored extracts_from_a_real_screenshot --nocapture
 ```
 
+### Frontend tests
+
+The frontend has no build step and no npm dependencies, so its tests are
+two HTML files you open in a browser. Serve the repo root and visit them:
+
+```bash
+python3 -m http.server 8000
+```
+
+- <http://localhost:8000/tests/calendar.test.html> — the calendar's date
+  math and aggregation: date parsing (including hand-edited and invalid
+  values), leap years, the 6x7 grid and its padding, heat-level scaling,
+  per-month totals, streaks across month boundaries, and year wrapping.
+  The page title reads `PASS n/n` or `FAIL n/n`, with a per-test list.
+- <http://localhost:8000/tests/ui-harness.html> — the real `index.html`
+  and `app.js`, with `window.__TAURI__` replaced by a mock that serves
+  fixture rows. Every tab, the capture form, the save flow, and the
+  calendar are clickable without building or launching the app.
+
 ## Building the installers
 
 ```bash
@@ -215,6 +264,8 @@ Change the path from the Settings tab at any time.
   date/company/position — handy if a listing gets taken down later.
 - **Status counts.** A small `12 Applied · 3 Interviewing · ...` line
   above the Applications list, computed from what's already loaded.
+- **Calendar.** A month grid shading each day by how many applications
+  went out that day, so a slow week is visible at a glance. See below.
 
 ## CI: building both installers automatically
 
