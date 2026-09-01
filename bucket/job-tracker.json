@@ -1,0 +1,40 @@
+{
+    "version": "0.1.0",
+    "description": "Tray-based job application tracker that saves straight to Excel",
+    "homepage": "https://github.com/Carkappa/Snaptrack",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/Carkappa/Snaptrack/releases/download/v0.1.0/Job.Tracker_0.1.0_x64-setup.exe#/setup.exe",
+            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+    },
+    "installer": {
+        "script": [
+            "Write-Host 'Running the Job Tracker installer...'",
+            "Start-Process -Wait -FilePath \"$dir\\setup.exe\" -ArgumentList '/S'"
+        ]
+    },
+    "uninstaller": {
+        "script": [
+            "$uninst = \"$env:LOCALAPPDATA\\Programs\\Job Tracker\\uninstall.exe\"",
+            "if (Test-Path $uninst) { Start-Process -Wait -FilePath $uninst -ArgumentList '/S' }"
+        ]
+    },
+    "checkver": {
+        "github": "https://github.com/Carkappa/Snaptrack"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/Carkappa/Snaptrack/releases/download/v$version/Job.Tracker_$version_x64-setup.exe#/setup.exe"
+            }
+        }
+    },
+    "notes": [
+        "Job Tracker runs in the system tray. Press Ctrl+Shift+J to open the capture panel.",
+        "Screenshot extraction uses Tesseract by default - install it from",
+        "https://github.com/UB-Mannheim/tesseract/wiki (tick 'Add to PATH'),",
+        "or switch to the Claude API in Settings."
+    ]
+}

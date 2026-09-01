@@ -52,6 +52,50 @@ Either way, nothing is ever invented — a field that isn't visible (or
 that the extractor isn't confident about) comes back empty for you to
 fill in, never guessed.
 
+## Installing
+
+### macOS
+
+One-liner (downloads the latest release, installs to `/Applications`,
+clears the Gatekeeper quarantine flag, and launches it):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Carkappa/Snaptrack/main/scripts/install.sh | bash
+```
+
+Or via Homebrew:
+
+```bash
+brew tap Carkappa/snaptrack https://github.com/Carkappa/Snaptrack
+brew install --cask job-tracker
+```
+
+Apple Silicon only — CI builds an `aarch64` binary. On an Intel Mac,
+build from source with `cargo tauri build`.
+
+### Windows
+
+One-liner in PowerShell (downloads the latest release installer and runs
+it silently):
+
+```powershell
+irm https://raw.githubusercontent.com/Carkappa/Snaptrack/main/scripts/install.ps1 | iex
+```
+
+Or via [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add snaptrack https://github.com/Carkappa/Snaptrack
+scoop install snaptrack/job-tracker
+```
+
+### Manual download
+
+Grab the `.dmg` (macOS) or `-setup.exe` / `.msi` (Windows) from the
+[Releases page](https://github.com/Carkappa/Snaptrack/releases). See
+[About the unsigned builds](#about-the-unsigned-builds) for the
+Gatekeeper/SmartScreen warnings you'll need to click through.
+
 ## Project layout
 
 ```
