@@ -586,6 +586,22 @@ mod tests {
             workbook.save(&path).unwrap();
         }
 
+        // Prove the raw cell really is a number, so this test would catch a
+        // regression to plain `cell_to_string` rather than passing either way.
+        {
+            let mut wb: Xlsx<_> = open_workbook(&path).unwrap();
+            let range = wb.worksheet_range(SHEET_NAME).unwrap();
+            let raw = cell_to_string(range.rows().nth(1).unwrap().first());
+            assert_ne!(
+                raw, "2026-09-01",
+                "the cell should be date-typed, not text - otherwise this test proves nothing"
+            );
+            assert!(
+                raw.chars().next().is_some_and(|c| c.is_ascii_digit()) && !raw.contains('-'),
+                "expected a bare serial number from the untreated cell, got '{raw}'"
+            );
+        }
+
         let rows = read_applications(&path).expect("a hand-formatted workbook should still read");
         assert_eq!(rows.len(), 1);
         assert_eq!(
