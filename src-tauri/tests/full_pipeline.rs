@@ -219,3 +219,37 @@ fn reads_real_clipboard_image() {
     println!("clipboard image is {}x{}", decoded.width(), decoded.height());
     assert!(decoded.width() > 0 && decoded.height() > 0);
 }
+
+/// Manual verification test, not run in CI: runs the real Tesseract-backed
+/// `extract_with_local_ocr` command against a real screenshot file and
+/// prints what it guessed, so the heuristic's real-world accuracy can be
+/// eyeballed against an actual job posting (not just synthetic fixtures).
+///
+/// Run it with:
+///   OCR_TEST_IMAGE=/path/to/screenshot.png \
+///     cargo test --test full_pipeline -- --ignored extracts_from_a_real_screenshot --nocapture
+#[test]
+#[ignore]
+fn extracts_from_a_real_screenshot() {
+    let path = std::env::var("OCR_TEST_IMAGE")
+        .expect("set OCR_TEST_IMAGE to a screenshot file path first, see doc comment above");
+    let bytes = std::fs::read(&path).expect("should be able to read OCR_TEST_IMAGE");
+    let base64_str = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    let result = commands::extract_with_local_ocr(base64_str).expect("extraction should not error");
+    match result {
+        ExtractionResult::Parsed { fields } => {
+            println!("company:         {:?}", fields.company);
+            println!("position:        {:?}", fields.position);
+            println!("location:        {:?}", fields.location);
+            println!("work_type:       {:?}", fields.work_type);
+            println!("employment_type: {:?}", fields.employment_type);
+            println!("salary_range:    {:?}", fields.salary_range);
+            println!("job_id:          {:?}", fields.job_id);
+            println!("posted_date:     {:?}", fields.posted_date);
+            println!("notes:\n{}", fields.notes.unwrap_or_default());
+            assert!(fields.company.is_some() || fields.position.is_some());
+        }
+        ExtractionResult::ParseFailed { error, .. } => panic!("expected fields, got: {error}"),
+    }
+}

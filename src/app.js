@@ -58,6 +58,9 @@
     exportCsvBtn: el("export-csv-btn"),
     tbody: el("applications-tbody"),
 
+    extractionMethodSelect: el("settings-extraction-method"),
+    extractionMethodStatus: el("extraction-method-status"),
+
     apiKeyStatus: el("api-key-status"),
     settingsApiKey: el("settings-api-key"),
     settingsSaveKey: el("settings-save-key"),
@@ -79,6 +82,7 @@
   let setupDismissedThisSession = false;
   let editingIndex = null; // set when editing an existing row from the list tab
   let currentImage = null; // { base64, mediaType } of the screenshot behind the current form, if any
+  let currentExtractionMethod = "tesseract";
 
   function todayIso() {
     const d = new Date();
@@ -265,7 +269,10 @@
     dom.form.hidden = true;
 
     try {
-      const result = await invoke("extract_from_image", { imageBase64: base64, mediaType });
+      const result =
+        currentExtractionMethod === "tesseract"
+          ? await invoke("extract_with_local_ocr", { imageBase64: base64 })
+          : await invoke("extract_from_image", { imageBase64: base64, mediaType });
       dom.thumbnailStatus.textContent = "Extracted - review and save below.";
       if (result.kind === "Parsed") {
         applyExtractedFields(result.fields);
@@ -595,6 +602,38 @@
 
   // ---------- Settings tab ----------
 
+  async function refreshExtractionMethodStatus() {
+    if (currentExtractionMethod === "tesseract") {
+      const available = await invoke("local_ocr_available");
+      dom.extractionMethodStatus.textContent = available
+        ? "Tesseract detected - screenshots are read locally, for free."
+        : "Tesseract not found. Install it with `brew install tesseract` (macOS), your package manager (Linux), or from github.com/tesseract-ocr/tesseract (Windows), or switch to Claude below.";
+    } else {
+      dom.extractionMethodStatus.textContent =
+        "Uses the Anthropic API for higher-accuracy extraction - see the API key section below.";
+    }
+  }
+
+  async function loadExtractionMethod() {
+    try {
+      currentExtractionMethod = await invoke("get_extraction_method");
+    } catch (_) {
+      currentExtractionMethod = "tesseract";
+    }
+    dom.extractionMethodSelect.value = currentExtractionMethod;
+    await refreshExtractionMethodStatus();
+  }
+
+  dom.extractionMethodSelect.addEventListener("change", async () => {
+    currentExtractionMethod = dom.extractionMethodSelect.value;
+    try {
+      await invoke("set_extraction_method", { method: currentExtractionMethod });
+    } catch (_) {
+      /* best effort - the in-memory value still takes effect this session */
+    }
+    await refreshExtractionMethodStatus();
+  });
+
   async function refreshApiKeyStatus() {
     const hasKey = await invoke("has_api_key");
     dom.apiKeyStatus.textContent = hasKey
@@ -673,6 +712,7 @@
     applyPlatformHints();
     resetCaptureArea();
     await populateStatusDropdown();
+    await loadExtractionMethod();
     await checkFirstRunSetup();
     await refreshApiKeyStatus();
     await refreshExcelPath();

@@ -7,6 +7,8 @@ use tauri_plugin_store::StoreExt;
 
 const STORE_FILE: &str = "settings.json";
 const EXCEL_PATH_KEY: &str = "excel_path";
+const EXTRACTION_METHOD_KEY: &str = "extraction_method";
+const DEFAULT_EXTRACTION_METHOD: &str = "tesseract";
 
 fn default_excel_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
     let docs = app
@@ -58,6 +60,61 @@ pub async fn extract_from_image(
 ) -> Result<ExtractionResult, String> {
     let api_key = keychain::get_api_key()?;
     extraction::extract_fields_from_image(&api_key, &image_base64, &media_type).await
+}
+
+#[tauri::command]
+pub fn get_extraction_method<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    Ok(store
+        .get(EXTRACTION_METHOD_KEY)
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| DEFAULT_EXTRACTION_METHOD.to_string()))
+}
+
+#[tauri::command]
+pub fn set_extraction_method<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    method: String,
+) -> Result<(), String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    store.set(EXTRACTION_METHOD_KEY, serde_json::json!(method));
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))
+}
+
+#[tauri::command]
+pub fn local_ocr_available() -> bool {
+    crate::local_ocr::tesseract_available()
+}
+
+/// Free, offline alternative to `extract_from_image`, backed by a
+/// locally installed Tesseract binary. Always returns `Parsed` (never
+/// invents values it isn't reasonably confident about) with the full
+/// raw OCR text attached to `notes` for the user to double-check, since
+/// this is meaningfully less reliable than Claude's actual
+/// understanding of the image.
+#[tauri::command]
+pub fn extract_with_local_ocr(image_base64: String) -> Result<ExtractionResult, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(image_base64)
+        .map_err(|e| format!("Invalid image data: {e}"))?;
+
+    let lines = crate::local_ocr::run_ocr(&bytes)?;
+    if lines.is_empty() {
+        return Ok(ExtractionResult::ParseFailed {
+            raw_text: String::new(),
+            error: "No text was detected in the image.".to_string(),
+        });
+    }
+
+    Ok(ExtractionResult::Parsed {
+        fields: crate::local_ocr::guess_fields(&lines),
+    })
 }
 
 #[tauri::command]

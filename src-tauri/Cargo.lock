@@ -2020,6 +2020,7 @@ dependencies = [
  "csv",
  "image",
  "keyring",
+ "regex",
  "reqwest 0.12.28",
  "rust_xlsxwriter",
  "serde",

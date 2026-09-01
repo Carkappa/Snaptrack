@@ -11,10 +11,12 @@
     <div class="setup-card">
       <h1>Welcome to Job Tracker</h1>
       <p>
-        Paste a screenshot of a job posting and Claude will pull out the
-        company, role, and details for you. This needs an Anthropic API key.
+        Paste a screenshot of a job posting and it'll pull out the company,
+        role, and details for you. By default this uses Tesseract, running
+        entirely on your machine, free - if it's installed. Add an Anthropic
+        API key below for meaningfully more accurate extraction with Claude.
       </p>
-      <label for="setup-api-key">Anthropic API key</label>
+      <label for="setup-api-key">Anthropic API key (optional)</label>
       <input id="setup-api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
       <div id="setup-error" class="error-text" hidden></div>
       <div class="setup-actions">
@@ -23,7 +25,7 @@
       </div>
       <p class="hint">
         Stored in your OS keychain. Never written to a file or environment
-        variable. You can add or change it later in Settings.
+        variable. Switch between Claude and Tesseract anytime in Settings.
       </p>
     </div>
   </div>
@@ -167,6 +169,16 @@
 
       <!-- SETTINGS TAB -->
       <section id="tab-settings" class="tab-panel">
+        <div class="settings-group">
+          <h2>Screenshot extraction method</h2>
+          <label for="settings-extraction-method">Method</label>
+          <select id="settings-extraction-method">
+            <option value="tesseract">Tesseract (free, offline)</option>
+            <option value="claude">Claude API (most accurate, needs a key)</option>
+          </select>
+          <p id="extraction-method-status" class="hint"></p>
+        </div>
+
         <div class="settings-group">
           <h2>Anthropic API key</h2>
           <p id="api-key-status" class="hint">Checking&hellip;</p>

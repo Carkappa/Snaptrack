@@ -2,6 +2,7 @@ pub mod commands;
 mod excel;
 mod extraction;
 mod keychain;
+mod local_ocr;
 pub mod models;
 
 use tauri::{
@@ -108,6 +109,10 @@ pub fn run() {
             commands::update_application_at_index,
             commands::export_csv,
             commands::save_screenshot,
+            commands::get_extraction_method,
+            commands::set_extraction_method,
+            commands::local_ocr_available,
+            commands::extract_with_local_ocr,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the job tracker application");
