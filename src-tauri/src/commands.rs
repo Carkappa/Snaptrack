@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn refuses_things_that_are_not_urls_at_all() {
-        for raw in ["", "   ", "not a url", "C:\Windows\System32", "example.com"] {
+        for raw in ["", "   ", "not a url", r"C:\Windows\System32", "example.com"] {
             assert!(validated_http_url(raw).is_err(), "should refuse {raw:?}");
         }
     }

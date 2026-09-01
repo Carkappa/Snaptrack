@@ -10,7 +10,7 @@
 //! installed without the user clicking the button.
 
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 use tauri_plugin_updater::UpdaterExt;
 
 /// Placeholder shipped in `tauri.conf.json`. Until the repo owner generates a
