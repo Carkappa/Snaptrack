@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Tracker</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="setup-screen" class="setup-screen" hidden>
+    <div class="setup-card">
+      <h1>Welcome to Job Tracker</h1>
+      <p>
+        Paste a screenshot of a job posting and Claude will pull out the
+        company, role, and details for you. This needs an Anthropic API key.
+      </p>
+      <label for="setup-api-key">Anthropic API key</label>
+      <input id="setup-api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
+      <div id="setup-error" class="error-text" hidden></div>
+      <div class="setup-actions">
+        <button id="setup-save" class="btn btn-primary">Save key</button>
+        <button id="setup-skip" class="btn btn-link">Skip - I'll enter jobs by hand</button>
+      </div>
+      <p class="hint">
+        Stored in your OS keychain. Never written to a file or environment
+        variable. You can add or change it later in Settings.
+      </p>
+    </div>
+  </div>
+
+  <div id="app" class="app">
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="capture">Capture</button>
+      <button class="tab-btn" data-tab="list">Applications</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
+    </nav>
+
+    <main>
+      <!-- CAPTURE TAB -->
+      <section id="tab-capture" class="tab-panel active">
+        <div id="capture-dropzone" class="dropzone">
+          <p class="dropzone-title">Paste a screenshot</p>
+          <p class="dropzone-hint">
+            <kbd id="paste-hint-key">Cmd</kbd>+<kbd>V</kbd>, drag a file here, or
+          </p>
+          <button id="choose-file-btn" class="btn btn-secondary">Choose file&hellip;</button>
+          <button id="skip-screenshot-btn" class="btn btn-link">Skip screenshot &rarr;</button>
+          <div id="thumbnail-wrap" class="thumbnail-wrap" hidden>
+            <img id="thumbnail" alt="Pasted screenshot" />
+            <p id="thumbnail-status" class="thumbnail-status">Extracting details&hellip;</p>
+          </div>
+        </div>
+
+        <div id="parse-failed" class="parse-failed" hidden>
+          <p><strong>Couldn't parse Claude's response as JSON.</strong> Raw text below - fix the fields by hand.</p>
+          <textarea id="parse-failed-raw" readonly rows="4"></textarea>
+        </div>
+
+        <form id="application-form" class="app-form" hidden>
+          <div class="field-row">
+            <label for="f-company">Company *</label>
+            <input id="f-company" name="company" type="text" required />
+          </div>
+          <div class="field-row">
+            <label for="f-position">Position *</label>
+            <input id="f-position" name="position" type="text" required />
+          </div>
+          <div class="field-row field-row-split">
+            <div>
+              <label for="f-location">Location</label>
+              <input id="f-location" name="location" type="text" />
+            </div>
+            <div>
+              <label for="f-work-type">Work type</label>
+              <input id="f-work-type" name="work_type" type="text" placeholder="Remote / Hybrid / On-site" />
+            </div>
+          </div>
+          <div class="field-row field-row-split">
+            <div>
+              <label for="f-employment-type">Employment type</label>
+              <input id="f-employment-type" name="employment_type" type="text" placeholder="Full-time" />
+            </div>
+            <div>
+              <label for="f-salary-range">Salary range</label>
+              <input id="f-salary-range" name="salary_range" type="text" />
+            </div>
+          </div>
+          <div class="field-row field-row-split">
+            <div>
+              <label for="f-status">Status</label>
+              <select id="f-status" name="status"></select>
+            </div>
+            <div>
+              <label for="f-date-applied">Date applied</label>
+              <input id="f-date-applied" name="date_applied" type="date" required />
+            </div>
+          </div>
+          <div class="field-row field-row-split">
+            <div>
+              <label for="f-job-id">Job ID</label>
+              <input id="f-job-id" name="job_id" type="text" />
+            </div>
+            <div>
+              <label for="f-url">URL</label>
+              <input id="f-url" name="url" type="text" />
+            </div>
+          </div>
+          <div class="field-row">
+            <label for="f-notes">Notes</label>
+            <textarea id="f-notes" name="notes" rows="2"></textarea>
+          </div>
+
+          <div id="duplicate-banner" class="duplicate-banner" hidden>
+            <p>
+              An application for this company &amp; position already exists
+              (status: <strong id="duplicate-status"></strong>).
+            </p>
+            <div class="duplicate-actions">
+              <button type="button" id="duplicate-save-anyway" class="btn btn-secondary">Save anyway</button>
+              <button type="button" id="duplicate-update-status" class="btn btn-secondary">Update existing status instead</button>
+            </div>
+          </div>
+
+          <div id="save-error" class="error-text" hidden></div>
+
+          <div class="form-actions">
+            <button type="button" id="form-cancel" class="btn btn-link">Cancel (Esc)</button>
+            <button type="submit" id="form-save" class="btn btn-primary">Save (Enter)</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- LIST TAB -->
+      <section id="tab-list" class="tab-panel">
+        <div class="list-toolbar">
+          <input id="search-box" type="search" placeholder="Search company or position&hellip;" />
+        </div>
+        <div id="list-status" class="list-status">Loading&hellip;</div>
+        <div class="table-scroll">
+          <table id="applications-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Company</th>
+                <th>Position</th>
+                <th>Status</th>
+                <th>Location</th>
+                <th>Work type</th>
+                <th>Salary</th>
+                <th>Updated</th>
+                <th>Job ID</th>
+                <th>URL</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="applications-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- SETTINGS TAB -->
+      <section id="tab-settings" class="tab-panel">
+        <div class="settings-group">
+          <h2>Anthropic API key</h2>
+          <p id="api-key-status" class="hint">Checking&hellip;</p>
+          <label for="settings-api-key">New API key</label>
+          <input id="settings-api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
+          <div class="settings-actions">
+            <button id="settings-save-key" class="btn btn-secondary">Save key</button>
+            <button id="settings-delete-key" class="btn btn-link">Remove stored key</button>
+          </div>
+          <div id="settings-key-message" class="hint" hidden></div>
+        </div>
+
+        <div class="settings-group">
+          <h2>Excel workbook</h2>
+          <p class="hint">Every save reads and rewrites this file.</p>
+          <div class="path-row">
+            <input id="settings-excel-path" type="text" readonly />
+            <button id="settings-choose-path" class="btn btn-secondary">Choose&hellip;</button>
+          </div>
+          <div id="settings-path-message" class="hint" hidden></div>
+        </div>
+
+        <div class="settings-group">
+          <h2>Global hotkey</h2>
+          <p class="hint"><kbd id="settings-hotkey">Cmd+Shift+J</kbd> shows this window from anywhere.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="retry-toast" class="retry-toast" hidden>
+    <span id="retry-message"></span>
+    <button id="retry-btn" class="btn btn-primary btn-small">Retry</button>
+    <button id="retry-dismiss" class="btn btn-link btn-small">Dismiss</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

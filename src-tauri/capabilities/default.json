@@ -18,16 +18,7 @@
     "global-shortcut:allow-is-registered",
     "store:default",
     "dialog:allow-open",
-    "dialog:allow-message",
-    "fs:allow-read-file",
-    "fs:allow-write-file",
-    "fs:allow-exists",
-    {
-      "identifier": "fs:scope",
-      "allow": [
-        { "path": "$DOCUMENT/**" },
-        { "path": "$APPDATA/**" }
-      ]
-    }
+    "dialog:allow-save",
+    "dialog:allow-message"
   ]
 }
