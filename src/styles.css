@@ -777,6 +777,113 @@ main {
   white-space: nowrap;
 }
 
+/* Month / Year switch - the same segmented control as the main tabs, at a
+   smaller scale so it reads as secondary to them. */
+.cal-view-switch {
+  display: flex;
+  gap: 2px;
+  align-self: flex-end;
+  padding: 2px;
+  margin-bottom: 8px;
+  background: var(--segment-track);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.cal-view-btn {
+  padding: 3px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cal-view-btn.active {
+  background: var(--segment-thumb);
+  box-shadow: var(--segment-shadow);
+  font-weight: 590;
+}
+
+/* ---------- Calendar: year view ---------- */
+
+.cal-year {
+  --cal-year-cell: 11px;
+  --cal-year-gap: 3px;
+  flex-shrink: 0;
+  margin-bottom: 10px;
+}
+
+/* 53 week-columns never fit a 480px window, so the grid scrolls sideways
+   rather than shrinking the cells past legibility. */
+.cal-year-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+}
+
+.cal-year-months,
+.cal-year-grid {
+  display: grid;
+  grid-auto-columns: var(--cal-year-cell);
+  gap: var(--cal-year-gap);
+  width: max-content;
+}
+
+.cal-year-months {
+  grid-auto-flow: column;
+  margin-bottom: 4px;
+  height: 13px;
+}
+
+.cal-year-months span {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  grid-row: 1;
+}
+
+.cal-year-grid {
+  /* Seven rows, Sunday at the top; cells are appended column by column. */
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, var(--cal-year-cell));
+}
+
+.cal-year-day {
+  width: var(--cal-year-cell);
+  height: var(--cal-year-cell);
+  padding: 0;
+  border: none;
+  border-radius: 2.5px;
+  background: var(--heat-0);
+  font-family: inherit;
+  transition: transform 0.08s ease;
+}
+
+.cal-year-day.outside {
+  background: transparent;
+  cursor: default;
+}
+
+.cal-year-day.level-1 { background: var(--heat-1); }
+.cal-year-day.level-2 { background: var(--heat-2); }
+.cal-year-day.level-3 { background: var(--heat-3); }
+.cal-year-day.level-4 { background: var(--heat-4); }
+
+.cal-year-day.has-apps:hover {
+  transform: scale(1.35);
+}
+
+.cal-year-day.today {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+
+.cal-year-day.selected {
+  box-shadow: 0 0 0 1.5px var(--fg);
+}
+
 /* ---------- Settings tab ---------- */
 
 /* Grouped inset cards, the way macOS System Settings lays out a pane. */

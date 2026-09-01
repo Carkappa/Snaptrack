@@ -28,6 +28,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A build whose version isn't newer than what's installed is never
+      # offered as an update - and nothing about that failure is visible.
+      # Catch a forgotten bump here instead.
+      - name: Check the tag matches the crate version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(grep -m1 '^version = ' src-tauri/Cargo.toml | cut -d'"' -f2)
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::Tag v$tag does not match src-tauri/Cargo.toml version $crate."
+            echo "Run ./scripts/set-version.sh $tag, commit, then retag."
+            exit 1
+          fi
+          echo "Version $crate matches tag $GITHUB_REF_NAME."
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 

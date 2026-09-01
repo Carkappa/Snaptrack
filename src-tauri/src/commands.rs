@@ -510,3 +510,78 @@ pub async fn check_for_update<R: tauri::Runtime>(
 pub async fn install_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     updates::install(&app).await
 }
+
+/// Checks a row's URL before it is handed to the OS opener, returning the
+/// normalized form.
+///
+/// A row's URL can come from Claude's reading of a screenshot, from
+/// Tesseract's OCR, or from a hand-edited spreadsheet cell, so it is never
+/// something the app itself put there. Anything but http/https - `file:`,
+/// `javascript:`, a shell path - is refused rather than opened.
+fn validated_http_url(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    let parsed = url::Url::parse(trimmed)
+        .map_err(|_| format!("'{trimmed}' isn't a URL this can open."))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(parsed.to_string()),
+        other => Err(format!(
+            "Refusing to open a '{other}' link - only http and https are allowed."
+        )),
+    }
+}
+
+/// Opens a saved application's URL in the user's real browser.
+#[tauri::command]
+pub fn open_url<R: tauri::Runtime>(app: tauri::AppHandle<R>, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let safe = validated_http_url(&url)?;
+    app.opener()
+        .open_url(safe, None::<&str>)
+        .map_err(|e| format!("Couldn't open that link: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_the_urls_a_job_posting_actually_has() {
+        for url in [
+            "https://www.linkedin.com/jobs/view/4123456789",
+            "http://careers.example.com/posting?id=7",
+            "https://example.com/a%20path#frag",
+        ] {
+            assert!(validated_http_url(url).is_ok(), "should accept {url}");
+        }
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        assert_eq!(
+            validated_http_url("  https://example.com/  ").unwrap(),
+            "https://example.com/"
+        );
+    }
+
+    #[test]
+    fn refuses_every_scheme_but_http_and_https() {
+        for url in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "data:text/html,<script>alert(1)</script>",
+            "ftp://example.com/x",
+            "vbscript:msgbox(1)",
+        ] {
+            let err = validated_http_url(url).expect_err("should refuse {url}");
+            assert!(err.contains("Refusing to open"), "unexpected error: {err}");
+        }
+    }
+
+    #[test]
+    fn refuses_things_that_are_not_urls_at_all() {
+        for raw in ["", "   ", "not a url", "C:\Windows\System32", "example.com"] {
+            assert!(validated_http_url(raw).is_err(), "should refuse {raw:?}");
+        }
+    }
+}

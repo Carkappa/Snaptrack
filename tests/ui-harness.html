@@ -64,6 +64,9 @@
       updateResponse: { outcome: "UpToDate" },
       installUpdateCalls: 0,
       installUpdateFails: false,
+      openedUrls: [],
+      // Set true to exercise the rejection path the Rust scheme check produces.
+      openUrlFails: false,
     };
 
     const HANDLERS = {
@@ -91,6 +94,13 @@
       pick_image_file: () => null,
       pick_excel_path: () => null,
       save_screenshot: () => "screenshot.png",
+      open_url: ({ url }) => {
+        if (state.openUrlFails) {
+          throw new Error("Refusing to open a 'javascript' link - only http and https are allowed.");
+        }
+        state.openedUrls.push(url);
+        return null;
+      },
       get_app_version: () => "0.1.0",
       get_update_check_enabled: () => state.updateCheckEnabled,
       get_auto_install_updates: () => state.autoInstallUpdates,

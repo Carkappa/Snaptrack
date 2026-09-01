@@ -184,18 +184,30 @@
 
       <!-- CALENDAR TAB -->
       <section id="tab-calendar" class="tab-panel">
+        <div class="cal-view-switch" role="tablist">
+          <button class="cal-view-btn active" data-view="month" role="tab">Month</button>
+          <button class="cal-view-btn" data-view="year" role="tab">Year</button>
+        </div>
+
         <div class="cal-toolbar">
-          <button id="cal-prev" class="btn btn-secondary btn-small" aria-label="Previous month">&larr;</button>
+          <button id="cal-prev" class="btn btn-secondary btn-small" aria-label="Previous">&larr;</button>
           <h2 id="cal-month-label" class="cal-month-label">&nbsp;</h2>
-          <button id="cal-next" class="btn btn-secondary btn-small" aria-label="Next month">&rarr;</button>
+          <button id="cal-next" class="btn btn-secondary btn-small" aria-label="Next">&rarr;</button>
           <button id="cal-today" class="btn btn-link btn-small">Today</button>
         </div>
 
         <div id="cal-stats" class="cal-stats"></div>
 
-        <div class="cal-grid" role="grid" aria-labelledby="cal-month-label">
+        <div id="cal-grid" class="cal-grid" role="grid" aria-labelledby="cal-month-label">
           <div class="cal-weekdays" id="cal-weekdays" role="row"></div>
           <div class="cal-days" id="cal-days"></div>
+        </div>
+
+        <div id="cal-year" class="cal-year" hidden>
+          <div id="cal-year-scroll" class="cal-year-scroll">
+            <div id="cal-year-months" class="cal-year-months"></div>
+            <div id="cal-year-grid" class="cal-year-grid" role="grid"></div>
+          </div>
         </div>
 
         <div class="cal-legend">

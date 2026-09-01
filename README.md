@@ -37,7 +37,13 @@ from pale to solid against the busiest day of the month on screen — so
 a productive week and a quiet one are distinguishable without reading a
 single row.
 
-- Arrows page month to month, **Today** jumps back and selects today.
+- **Month** and **Year** views. The year view is a GitHub-contributions
+  style grid — one column per week, one square per day — that opens
+  scrolled to whatever is worth looking at (today, or the first day with
+  anything on it). Clicking a square drops into that month with the day
+  selected.
+- Arrows page month to month, or year to year in the year view.
+  **Today** jumps back and selects today.
 - Clicking a day lists that day's applications underneath; clicking one
   of those opens it in the edit form, the same as clicking a row in the
   Applications tab.
@@ -132,7 +138,7 @@ Gatekeeper/SmartScreen warnings you'll need to click through.
 src-tauri/            Rust backend (the actual application logic)
   src/
     lib.rs            App setup: tray icon, global shortcut, window behavior
-    commands.rs        All #[tauri::command]s exposed to the frontend
+    commands.rs        All #[tauri::command]s exposed to the frontend (with tests)
     extraction.rs      Anthropic API call + JSON parsing (with tests)
     local_ocr.rs         Tesseract-backed extraction + layout heuristics (with tests)
     excel.rs            xlsx read/write, CSV export, timestamped backups (with tests)
@@ -142,12 +148,13 @@ src-tauri/            Rust backend (the actual application logic)
   capabilities/         Tauri v2 permission grants for the main window
   icons/                 App icons (.icns / .ico / .png)
   tauri.conf.json         Window, bundle, and tray configuration
+scripts/set-version.sh  Bumps the version everywhere it appears, from one command
 src/                    Frontend — plain index.html + styles.css + app.js
-    calendar.js           Date math + per-day aggregation behind the Calendar tab
+    calendar.js           Date math + month/year aggregation behind the Calendar tab
 tests/                  Browser-run frontend tests (no npm, no runner)
   calendar.test.html     Pure-logic tests for src/calendar.js
   ui-harness.html        The real UI with the Tauri bridge mocked, for clicking through
-.github/workflows/      CI: cargo test on every push, installers on a version tag
+.github/workflows/      CI: Rust + frontend tests on every push, installers on a tag
 ```
 
 ## Prerequisites
@@ -185,7 +192,8 @@ cargo test
 ```
 
 This also runs on every push and pull request — see
-`.github/workflows/test.yml`.
+`.github/workflows/test.yml`, which additionally runs the frontend suite
+below in headless Chrome.
 
 Covers: stripping ```` ``` ```` fences from Claude's response, parsing
 (and gracefully failing to parse) extracted JSON, the Tesseract
@@ -223,9 +231,11 @@ python3 -m http.server 8000
 
 - <http://localhost:8000/tests/calendar.test.html> — the calendar's date
   math and aggregation: date parsing (including hand-edited and invalid
-  values), leap years, the 6x7 grid and its padding, heat-level scaling,
-  per-month totals, streaks across month boundaries, and year wrapping.
-  The page title reads `PASS n/n` or `FAIL n/n`, with a per-test list.
+  values), leap years, the 6x7 month grid and the 53-week year grid with
+  their padding, heat-level scaling, per-month and per-year totals,
+  streaks across month boundaries, and year wrapping. The page title reads
+  `PASS n/n` or `FAIL n/n`, with a per-test list. **This one also runs in
+  CI**, in headless Chrome, so a red result fails the build.
 - <http://localhost:8000/tests/ui-harness.html> — the real `index.html`
   and `app.js`, with `window.__TAURI__` replaced by a mock that serves
   fixture rows. Every tab, the capture form, the save flow, and the
@@ -265,6 +275,10 @@ Change the path from the Settings tab at any time.
   but the Status dropdown) to reopen it in the full edit form.
 - **CSV export.** One click in the Applications tab writes a sibling
   `JobApplications.csv` next to the workbook.
+- **Openable links.** The `link` cell in the Applications table opens the
+  posting in your real browser. Only `http`/`https` are accepted — a row's
+  URL came off a screenshot or a spreadsheet cell, not from this app, so
+  the scheme is checked rather than trusted.
 - **Automatic backups.** Every save copies the previous workbook into a
   `backups/` folder next to it first (timestamped, capped at the last
   10), so a bad edit never loses prior data.
@@ -346,9 +360,22 @@ normally.
 **The release has to be published, not left as a draft.** The workflow
 creates releases as drafts on purpose so you can check the artifacts
 first; GitHub doesn't serve draft assets, so installed apps see nothing
-until you hit Publish. Bump `version` in both `tauri.conf.json` and
-`src-tauri/Cargo.toml` before tagging, or the new build won't look newer
-than what's already installed.
+until you hit Publish.
+
+### Bumping the version
+
+`src-tauri/Cargo.toml` is the source of truth — `tauri.conf.json` has no
+`version` field at all and inherits it. The two package manifests have to
+carry a literal copy, so one script keeps all three in step:
+
+```bash
+./scripts/set-version.sh 0.2.0
+```
+
+An installer whose version isn't newer than what's installed is simply
+never offered as an update, and nothing about that failure is visible, so
+the release workflow also refuses to build when the tag and the crate
+version disagree.
 
 ## CI: building both installers automatically
 

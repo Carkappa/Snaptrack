@@ -215,6 +215,124 @@
         eq(grid.cells.find((c) => c.iso === "2026-09-02").level, 1);
       });
 
+      // ---- yearGrid ----
+
+      test("yearGrid is whole weeks of 7, covering the whole year", () => {
+        for (const y of [2026, 2024, 2027]) {
+          const grid = cal.yearGrid(y, Object.create(null), { year: 2026, month: 9, day: 1 });
+          ok(grid.columns.every((c) => c.length === 7), y + " columns are 7 tall");
+          eq(grid.cells.length, grid.columns.length * 7, y + " cell count");
+          ok(grid.columns.length >= 52 && grid.columns.length <= 54, y + " week count: " + grid.columns.length);
+          const inYear = grid.cells.filter((c) => c.inYear);
+          eq(inYear.length, y === 2024 ? 366 : 365, y + " days in year");
+        }
+      });
+
+      test("yearGrid starts on a Sunday and ends on a Saturday", () => {
+        const grid = cal.yearGrid(2026, Object.create(null), { year: 2026, month: 9, day: 1 });
+        eq(grid.cells[0].iso, "2025-12-28", "Sunday on or before 1 Jan 2026");
+        eq(grid.cells[0].inYear, false);
+        eq(grid.cells[grid.cells.length - 1].iso, "2027-01-02", "Saturday on or after 31 Dec 2026");
+        eq(grid.cells[grid.cells.length - 1].inYear, false);
+      });
+
+      test("yearGrid rows are the weekdays in order", () => {
+        const grid = cal.yearGrid(2026, Object.create(null), { year: 2026, month: 9, day: 1 });
+        for (const column of grid.columns) {
+          for (let row = 0; row < 7; row++) {
+            const c = column[row];
+            eq(new Date(c.year, c.month - 1, c.day).getDay(), row, c.iso + " weekday row");
+          }
+        }
+      });
+
+      test("yearGrid carries counts and scales heat across the year", () => {
+        const rows = apps([
+          ["2026-03-02", "A", "1"], ["2026-03-02", "B", "2"], ["2026-03-02", "C", "3"],
+          ["2026-03-02", "D", "4"],
+          ["2026-11-20", "E", "5"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        const grid = cal.yearGrid(2026, byDate, { year: 2026, month: 9, day: 1 });
+        const cell = (iso) => grid.cells.find((c) => c.iso === iso);
+        eq(grid.max, 4);
+        eq(cell("2026-03-02").count, 4);
+        eq(cell("2026-03-02").level, 4);
+        eq(cell("2026-11-20").level, 1);
+        eq(cell("2026-03-03").level, 0);
+      });
+
+      test("yearGrid ignores neighbouring years when scaling heat", () => {
+        const rows = apps([
+          ["2025-12-29", "A", "1"], ["2025-12-29", "B", "2"], ["2025-12-29", "C", "3"],
+          ["2026-06-01", "D", "4"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        const grid = cal.yearGrid(2026, byDate, { year: 2026, month: 9, day: 1 });
+        eq(grid.max, 1, "only in-year days scale the heat");
+        const dec29 = grid.cells.find((c) => c.iso === "2025-12-29");
+        eq(dec29.count, 3, "padding cells still report their count");
+        eq(dec29.level, 0, "but are never coloured");
+      });
+
+      test("yearGrid reports where each month starts", () => {
+        const grid = cal.yearGrid(2026, Object.create(null), { year: 2026, month: 9, day: 1 });
+        eq(grid.monthStarts.length, 12);
+        eq(grid.monthStarts[0].month, 1);
+        eq(grid.monthStarts[11].month, 12);
+        ok(
+          grid.monthStarts.every((m, i) => i === 0 || m.column >= grid.monthStarts[i - 1].column),
+          "month columns increase"
+        );
+        // 1 Jan 2026 is a Thursday, in the very first (padded) week.
+        eq(grid.monthStarts[0].column, 0);
+      });
+
+      test("yearGrid marks today only when it falls in that year", () => {
+        const inYear = cal.yearGrid(2026, Object.create(null), { year: 2026, month: 9, day: 15 });
+        eq(inYear.cells.filter((c) => c.isToday).map((c) => c.iso), ["2026-09-15"]);
+        const otherYear = cal.yearGrid(2024, Object.create(null), { year: 2026, month: 9, day: 15 });
+        eq(otherYear.cells.filter((c) => c.isToday).length, 0);
+      });
+
+      // ---- yearStats / yearRange ----
+
+      test("yearStats totals only the year asked for", () => {
+        const rows = apps([
+          ["2025-12-31", "Last year", "x"],
+          ["2026-01-01", "A", "1"], ["2026-01-01", "B", "2"],
+          ["2026-07-04", "C", "3"],
+          ["2027-01-01", "Next year", "x"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        const stats = cal.yearStats(2026, byDate);
+        eq(stats.total, 3);
+        eq(stats.activeDays, 2);
+        eq(stats.busiest, { iso: "2026-01-01", count: 2 });
+      });
+
+      test("yearStats handles a year with nothing in it", () => {
+        eq(cal.yearStats(2020, Object.create(null)), { total: 0, activeDays: 0, busiest: null });
+      });
+
+      test("yearStats counts every day of a leap year", () => {
+        const rows = apps([["2024-02-29", "Leap", "day"]]);
+        const { byDate } = cal.groupByDate(rows);
+        eq(cal.yearStats(2024, byDate).total, 1, "29 Feb is not skipped");
+      });
+
+      test("yearRange spans the first and last year with data", () => {
+        const rows = apps([
+          ["2024-05-01", "A", "1"], ["2026-09-01", "B", "2"], ["2025-01-01", "C", "3"],
+        ]);
+        const { byDate } = cal.groupByDate(rows);
+        eq(cal.yearRange(byDate), { min: 2024, max: 2026 });
+      });
+
+      test("yearRange is empty when nothing is dated", () => {
+        eq(cal.yearRange(Object.create(null)), { min: null, max: null });
+      });
+
       // ---- monthStats ----
 
       test("monthStats totals only the month on screen", () => {

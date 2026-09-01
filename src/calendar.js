@@ -149,6 +149,101 @@
     };
   }
 
+  /// The whole year as a GitHub-style grid: one column per week, seven rows
+  /// Sunday..Saturday, running from the Sunday on or before 1 January to the
+  /// Saturday on or after 31 December.
+  ///
+  /// Days outside the year are still emitted (so every column is a full
+  /// week) but flagged `inYear: false`, and like the month grid's padding
+  /// they never take a heat level and never scale the others.
+  function yearGrid(year, byDate, today) {
+    const ref = today || todayParts();
+    const todayKey = iso(ref.year, ref.month, ref.day);
+
+    const start = new Date(year, 0, 1);
+    start.setDate(start.getDate() - start.getDay());
+    const end = new Date(year, 11, 31);
+    end.setDate(end.getDate() + (6 - end.getDay()));
+
+    const columns = [];
+    const monthStarts = [];
+    let column = [];
+    const cursor = new Date(start);
+
+    while (cursor <= end) {
+      const cellYear = cursor.getFullYear();
+      const cellMonth = cursor.getMonth() + 1;
+      const cellDay = cursor.getDate();
+      const key = iso(cellYear, cellMonth, cellDay);
+      const inYear = cellYear === year;
+
+      if (inYear && cellDay === 1) {
+        monthStarts.push({ month: cellMonth, column: columns.length });
+      }
+
+      column.push({
+        iso: key,
+        year: cellYear,
+        month: cellMonth,
+        day: cellDay,
+        inYear,
+        isToday: key === todayKey,
+        count: countOn(byDate, key),
+        level: 0,
+      });
+
+      if (column.length === 7) {
+        columns.push(column);
+        column = [];
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    if (column.length) columns.push(column);
+
+    const cells = columns.flat();
+    const max = cells.reduce((acc, c) => (c.inYear && c.count > acc ? c.count : acc), 0);
+    for (const cell of cells) {
+      cell.level = cell.inYear ? heatLevel(cell.count, max) : 0;
+    }
+
+    return { columns, cells, max, monthStarts };
+  }
+
+  /// Totals for a whole year, plus the busiest single day in it.
+  function yearStats(year, byDate) {
+    let total = 0;
+    let activeDays = 0;
+    let busiest = null;
+    for (let month = 1; month <= 12; month++) {
+      const days = daysInMonth(year, month);
+      for (let day = 1; day <= days; day++) {
+        const key = iso(year, month, day);
+        const count = countOn(byDate, key);
+        if (!count) continue;
+        total += count;
+        activeDays += 1;
+        if (!busiest || count > busiest.count) {
+          busiest = { iso: key, count };
+        }
+      }
+    }
+    return { total, activeDays, busiest };
+  }
+
+  /// The span of years the workbook actually covers, so the year view can
+  /// stop the user paging into empty decades.
+  function yearRange(byDate) {
+    let min = null;
+    let max = null;
+    for (const key of Object.keys(byDate)) {
+      const parts = parseDate(key);
+      if (!parts) continue;
+      if (min === null || parts.year < min) min = parts.year;
+      if (max === null || parts.year > max) max = parts.year;
+    }
+    return { min, max };
+  }
+
   /// Headline numbers for the month on screen.
   function monthStats(year, month, byDate) {
     const days = daysInMonth(year, month);
@@ -215,6 +310,9 @@
     heatLevel,
     monthGrid,
     monthStats,
+    yearGrid,
+    yearStats,
+    yearRange,
     currentStreak,
     shiftMonth,
     monthLabel,

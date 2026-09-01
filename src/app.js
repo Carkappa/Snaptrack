@@ -65,6 +65,12 @@
     calStats: el("cal-stats"),
     calWeekdays: el("cal-weekdays"),
     calDays: el("cal-days"),
+    calGrid: el("cal-grid"),
+    calYear: el("cal-year"),
+    calYearScroll: el("cal-year-scroll"),
+    calYearMonths: el("cal-year-months"),
+    calYearGrid: el("cal-year-grid"),
+    calViewButtons: Array.from(document.querySelectorAll(".cal-view-btn")),
     calDayDetail: el("cal-day-detail"),
     calUndated: el("cal-undated"),
 
@@ -117,6 +123,7 @@
   const calTodayParts = cal.todayParts();
   let calCursor = { year: calTodayParts.year, month: calTodayParts.month }; // month on screen
   let calSelectedDay = null; // "YYYY-MM-DD" of the day whose entries are listed
+  let calView = "month";     // "month" | "year"
   let calGroups = { byDate: Object.create(null), undated: [] };
 
   function todayIso() {
@@ -599,11 +606,17 @@
     }
   });
 
-  dom.tbody.addEventListener("click", (e) => {
+  dom.tbody.addEventListener("click", async (e) => {
     if (e.target.classList.contains("row-url")) {
       e.preventDefault();
-      // Webview navigation to arbitrary external URLs is intentionally
-      // not wired up; the link text still lets users copy/see the URL.
+      // Handed to the OS browser rather than navigated to in the webview.
+      // The Rust side allows only http/https - a row's URL came off a
+      // screenshot or a spreadsheet cell, not from this app.
+      try {
+        await invoke("open_url", { url: e.target.dataset.url });
+      } catch (err) {
+        dom.listStatus.textContent = String(err);
+      }
       return;
     }
     if (e.target.classList.contains("row-status")) return;
@@ -647,9 +660,38 @@
   }
 
   function renderCalendar() {
-    renderWeekdayHeader();
     calGroups = cal.groupByDate(allApplications);
-    const { byDate, undated } = calGroups;
+
+    dom.calViewButtons.forEach((btn) =>
+      btn.classList.toggle("active", btn.dataset.view === calView)
+    );
+    dom.calGrid.hidden = calView !== "month";
+    dom.calYear.hidden = calView !== "year";
+
+    if (calView === "year") {
+      renderYearView();
+    } else {
+      renderMonthView();
+    }
+
+    renderUndatedNote();
+    renderDayDetail();
+  }
+
+  function renderUndatedNote() {
+    const { undated } = calGroups;
+    if (undated.length > 0) {
+      dom.calUndated.hidden = false;
+      dom.calUndated.textContent = `${undated.length} application${undated.length === 1 ? " has an unreadable Date Applied and isn't" : "s have an unreadable Date Applied and aren't"} shown on the calendar.`;
+    } else {
+      dom.calUndated.hidden = true;
+      dom.calUndated.textContent = "";
+    }
+  }
+
+  function renderMonthView() {
+    renderWeekdayHeader();
+    const { byDate } = calGroups;
     const { year, month } = calCursor;
 
     dom.calMonthLabel.textContent = cal.monthLabel(year, month);
@@ -684,16 +726,52 @@
       parts.push(`${streak}-day streak`);
     }
     dom.calStats.textContent = parts.join(" · ");
+  }
 
-    if (undated.length > 0) {
-      dom.calUndated.hidden = false;
-      dom.calUndated.textContent = `${undated.length} application${undated.length === 1 ? " has an unreadable Date Applied and isn't" : "s have an unreadable Date Applied and aren't"} shown on the calendar.`;
-    } else {
-      dom.calUndated.hidden = true;
-      dom.calUndated.textContent = "";
+  function renderYearView() {
+    const { byDate } = calGroups;
+    const { year } = calCursor;
+
+    dom.calMonthLabel.textContent = String(year);
+
+    const { columns, monthStarts } = cal.yearGrid(year, byDate, calTodayParts);
+
+    // Month labels sit on the same column track as the grid below them.
+    dom.calYearMonths.innerHTML = monthStarts
+      .map(
+        (m) =>
+          `<span style="grid-column: ${m.column + 1} / span 4">${cal.MONTH_NAMES[m.month - 1].slice(0, 3)}</span>`
+      )
+      .join("");
+
+    dom.calYearGrid.innerHTML = columns
+      .flat()
+      .map((cell) => {
+        const classes = ["cal-year-day", `level-${cell.level}`];
+        if (!cell.inYear) classes.push("outside");
+        if (cell.isToday) classes.push("today");
+        if (cell.count > 0) classes.push("has-apps");
+        if (cell.iso === calSelectedDay) classes.push("selected");
+        const label = `${cal.dayLabel(cell.iso)}: ${cell.count} application${cell.count === 1 ? "" : "s"}`;
+        return `<button type="button" class="${classes.join(" ")}" data-iso="${cell.iso}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"></button>`;
+      })
+      .join("");
+
+    scrollYearIntoView();
+
+    const stats = cal.yearStats(year, byDate);
+    const streak = cal.currentStreak(byDate, calTodayParts);
+    const parts = [
+      `${stats.total} application${stats.total === 1 ? "" : "s"} in ${year}`,
+      `${stats.activeDays} active day${stats.activeDays === 1 ? "" : "s"}`,
+    ];
+    if (stats.busiest) {
+      parts.push(`busiest ${cal.dayLabel(stats.busiest.iso)} (${stats.busiest.count})`);
     }
-
-    renderDayDetail();
+    if (streak > 0) {
+      parts.push(`${streak}-day streak`);
+    }
+    dom.calStats.textContent = parts.join(" · ");
   }
 
   function renderDayDetail() {
@@ -735,23 +813,64 @@
     renderCalendar();
   });
 
+  /// 53 weeks don't fit the window, and the left edge (January) is usually
+  /// the least interesting part. Centre on today, the selected day, or
+  /// failing both the first day with anything on it.
+  function scrollYearIntoView() {
+    const scroller = dom.calYearScroll;
+    if (!scroller.clientWidth) return; // laid out only once the tab is visible
+    const target =
+      dom.calYearGrid.querySelector(".cal-year-day.selected") ||
+      dom.calYearGrid.querySelector(".cal-year-day.today") ||
+      dom.calYearGrid.querySelector(".cal-year-day.has-apps");
+    if (!target) {
+      scroller.scrollLeft = 0;
+      return;
+    }
+    const cell = target.getBoundingClientRect();
+    const box = scroller.getBoundingClientRect();
+    scroller.scrollLeft += cell.left - box.left - scroller.clientWidth / 2 + cell.width / 2;
+  }
+
+  dom.calYearGrid.addEventListener("click", (e) => {
+    const cell = e.target.closest(".cal-year-day");
+    if (!cell || cell.classList.contains("outside")) return;
+    const parts = cal.parseDate(cell.dataset.iso);
+    if (!parts) return;
+    // A day in the year view is a way in to that month, not a destination.
+    calCursor = { year: parts.year, month: parts.month };
+    calSelectedDay = cell.dataset.iso;
+    calView = "month";
+    renderCalendar();
+  });
+
+  dom.calViewButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (calView === btn.dataset.view) return;
+      calView = btn.dataset.view;
+      renderCalendar();
+    });
+  });
+
   dom.calDayDetail.addEventListener("click", (e) => {
     const entry = e.target.closest(".cal-entry");
     if (!entry) return;
     enterEditModeFor(Number(entry.dataset.index));
   });
 
-  dom.calPrev.addEventListener("click", () => {
-    calCursor = cal.shiftMonth(calCursor.year, calCursor.month, -1);
+  /// The arrows step a month at a time in the month view and a year at a
+  /// time in the year view, so one toolbar serves both.
+  function stepCalendar(direction) {
+    calCursor =
+      calView === "year"
+        ? { year: calCursor.year + direction, month: calCursor.month }
+        : cal.shiftMonth(calCursor.year, calCursor.month, direction);
     calSelectedDay = null;
     renderCalendar();
-  });
+  }
 
-  dom.calNext.addEventListener("click", () => {
-    calCursor = cal.shiftMonth(calCursor.year, calCursor.month, 1);
-    calSelectedDay = null;
-    renderCalendar();
-  });
+  dom.calPrev.addEventListener("click", () => stepCalendar(-1));
+  dom.calNext.addEventListener("click", () => stepCalendar(1));
 
   dom.calToday.addEventListener("click", () => {
     calCursor = { year: calTodayParts.year, month: calTodayParts.month };

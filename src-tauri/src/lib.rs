@@ -28,6 +28,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
@@ -122,6 +123,7 @@ pub fn run() {
             commands::set_auto_install_updates,
             commands::check_for_update,
             commands::install_update,
+            commands::open_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the job tracker application");

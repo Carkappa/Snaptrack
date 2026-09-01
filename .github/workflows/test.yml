@@ -37,3 +37,36 @@ jobs:
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --verbose
+
+  # The frontend has no build step and no npm dependencies, and this keeps it
+  # that way: a static server plus the Chrome already on the runner. The test
+  # page writes its own verdict into #summary, so `--dump-dom` after the page
+  # has run is enough to read the result out.
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the calendar tests in headless Chrome
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8000 --bind 127.0.0.1 &
+          server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/ >/dev/null && break
+            sleep 0.5
+          done
+
+          chrome_args="--headless=new --disable-gpu --no-sandbox --virtual-time-budget=10000"
+          google-chrome $chrome_args --dump-dom http://127.0.0.1:8000/tests/calendar.test.html > dom.html
+
+          if grep -qE 'All [0-9]+ tests passed' dom.html; then
+            grep -oE 'All [0-9]+ tests passed' dom.html
+          else
+            echo "::error::Frontend calendar tests failed"
+            grep -oE '<div id="summary"[^>]*>[^<]*' dom.html || true
+            grep -oE '<li class="fail">.*?</li>' dom.html || true
+            exit 1
+          fi
