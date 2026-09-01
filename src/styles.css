@@ -1,40 +1,82 @@
+/* Job Tracker - visual language follows Apple's: system typography, system
+   accent blue, hairline separators, generous radii, grouped inset cards, and
+   a segmented control for navigation. Everything here is presentational; no
+   selector, id, or state class was renamed, so app.js is untouched by it. */
+
 :root {
   color-scheme: light dark;
+
   --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #6b6b6b;
-  --border: #d9d9d9;
-  --accent: #2563eb;
+  --bg-sunken: #f2f2f7;          /* iOS grouped-list background */
+  --panel: #f5f5f7;
+  --card: #ffffff;
+  --fg: #1d1d1f;
+  --muted: #86868b;
+  --separator: rgba(60, 60, 67, 0.14);
+  --border: rgba(60, 60, 67, 0.22);
+  --control: #ffffff;
+  --control-secondary: rgba(120, 120, 128, 0.12);
+  --accent: #007aff;
+  --accent-hover: #0071eb;
+  --accent-soft: rgba(0, 122, 255, 0.12);
   --accent-fg: #ffffff;
-  --danger: #b91c1c;
-  --danger-bg: #fde8e8;
-  --panel: #f5f6f8;
-  --radius: 6px;
-  --heat-0: #eceef1;
-  --heat-1: #cfe0fd;
-  --heat-2: #93bbfa;
-  --heat-3: #4c8dff;
-  --heat-4: #1d4ed8;
+  --danger: #d70015;
+  --danger-bg: rgba(255, 59, 48, 0.12);
+  --success: #248a3d;
+
+  --segment-track: rgba(120, 120, 128, 0.16);
+  --segment-thumb: #ffffff;
+  --segment-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+
+  --radius: 10px;
+  --radius-sm: 7px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-thumb: 0 3px 8px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
+
+  --heat-0: #ececf0;
+  --heat-1: #d3e6ff;
+  --heat-2: #9dc8ff;
+  --heat-3: #4da2ff;
+  --heat-4: #007aff;
   --heat-fg-strong: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1e1f22;
-    --fg: #e8e8e8;
-    --muted: #9a9a9a;
-    --border: #3a3b3e;
-    --accent: #4c8dff;
-    --accent-fg: #0a0a0a;
-    --danger: #ff6b6b;
-    --danger-bg: #3a1f1f;
-    --panel: #2a2b2e;
-    --heat-0: #303236;
-    --heat-1: #24405f;
-    --heat-2: #2d5f9e;
-    --heat-3: #3c81e0;
-    --heat-4: #6ba6ff;
-    --heat-fg-strong: #0a0a0a;
+    --bg: #1c1c1e;
+    --bg-sunken: #2c2c2e;
+    --panel: #2c2c2e;
+    --card: #2c2c2e;
+    --fg: #f5f5f7;
+    --muted: #98989d;
+    --separator: rgba(84, 84, 88, 0.55);
+    --border: rgba(120, 120, 128, 0.5);
+    --control: #3a3a3c;
+    --control-secondary: rgba(120, 120, 128, 0.24);
+    --accent: #0a84ff;
+    --accent-hover: #339dff;
+    --accent-soft: rgba(10, 132, 255, 0.22);
+    --accent-fg: #ffffff;
+    --danger: #ff453a;
+    --danger-bg: rgba(255, 69, 58, 0.18);
+    --success: #30d158;
+
+    --segment-track: rgba(120, 120, 128, 0.24);
+    --segment-thumb: #636366;
+    --segment-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-thumb: 0 3px 8px rgba(0, 0, 0, 0.5);
+
+    --heat-0: #2c2c2e;
+    --heat-1: #10375e;
+    --heat-2: #17548f;
+    --heat-3: #0a6fd8;
+    --heat-4: #0a84ff;
+    --heat-fg-strong: #ffffff;
   }
 }
 
@@ -58,90 +100,138 @@ html, body {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
   background: var(--bg);
   color: var(--fg);
+  -webkit-font-smoothing: antialiased;
 }
 
 button {
   font-family: inherit;
   font-size: 13px;
+  letter-spacing: inherit;
   cursor: pointer;
 }
 
 input, select, textarea {
   font-family: inherit;
   font-size: 13px;
-  background: var(--bg);
+  letter-spacing: inherit;
+  background: var(--control);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
   width: 100%;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+textarea {
+  resize: vertical;
 }
 
 input:focus, select:focus, textarea:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+input::placeholder, textarea::placeholder {
+  color: var(--muted);
+}
+
+/* ---------- Buttons ---------- */
+
 .btn {
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--panel);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--control-secondary);
   color: var(--fg);
-  padding: 7px 12px;
+  padding: 6px 13px;
+  font-weight: 500;
+  transition: background-color 0.12s ease, opacity 0.12s ease, transform 0.06s ease;
 }
 
 .btn:hover {
-  filter: brightness(0.97);
+  background: rgba(120, 120, 128, 0.22);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
 }
 
 .btn-primary {
   background: var(--accent);
-  border-color: var(--accent);
   color: var(--accent-fg);
-  font-weight: 600;
+  font-weight: 590;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
 }
 
 .btn-secondary {
-  background: var(--panel);
+  background: var(--control);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-sunken);
 }
 
 .btn-link {
   background: transparent;
   border: none;
+  box-shadow: none;
   color: var(--accent);
+  text-decoration: none;
+  padding: 6px;
+  font-weight: 400;
+}
+
+.btn-link:hover {
+  background: transparent;
   text-decoration: underline;
-  padding: 7px 4px;
 }
 
 .btn-small {
-  padding: 4px 8px;
+  padding: 4px 10px;
   font-size: 12px;
 }
 
 kbd {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 5px;
+  background: var(--control-secondary);
+  border: none;
+  border-radius: 5px;
+  padding: 2px 6px;
   font-size: 11px;
   font-family: inherit;
+  font-weight: 500;
+  color: var(--fg);
 }
 
 .hint {
   color: var(--muted);
   font-size: 11.5px;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .error-text {
   color: var(--danger);
   background: var(--danger-bg);
-  border-radius: var(--radius);
-  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
   font-size: 12px;
 }
 
@@ -151,27 +241,40 @@ kbd {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  background: var(--bg);
 }
 
+/* Segmented control, the way macOS and iOS do top-level navigation. */
 .tabs {
   display: flex;
-  border-bottom: 1px solid var(--border);
+  gap: 2px;
   flex-shrink: 0;
+  margin: 10px 12px 2px;
+  padding: 2px;
+  background: var(--segment-track);
+  border-radius: 9px;
 }
 
 .tab-btn {
   flex: 1;
-  padding: 10px 4px;
+  padding: 5px 4px;
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--muted);
+  border-radius: 7px;
+  color: var(--fg);
+  font-size: 12.5px;
   font-weight: 500;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tab-btn:hover:not(.active) {
+  background: rgba(120, 120, 128, 0.1);
 }
 
 .tab-btn.active {
-  color: var(--fg);
-  border-bottom-color: var(--accent);
+  background: var(--segment-thumb);
+  box-shadow: var(--segment-shadow);
+  font-weight: 590;
 }
 
 main {
@@ -202,19 +305,21 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 28px;
 }
 
 .setup-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
   max-width: 400px;
 }
 
 .setup-card h1 {
-  font-size: 18px;
-  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0 0 2px;
 }
 
 .setup-card p {
@@ -222,6 +327,11 @@ main {
   color: var(--muted);
   font-size: 12.5px;
   line-height: 1.5;
+}
+
+.setup-card label {
+  font-size: 11.5px;
+  color: var(--muted);
 }
 
 .setup-actions {
@@ -234,23 +344,28 @@ main {
 /* ---------- Capture tab ---------- */
 
 .dropzone {
-  border: 2px dashed var(--border);
-  border-radius: 10px;
-  padding: 18px 12px;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 14px;
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  background: var(--bg-sunken);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .dropzone.drag-over {
   border-color: var(--accent);
-  background: var(--panel);
+  border-style: solid;
+  background: var(--accent-soft);
 }
 
 .dropzone-title {
-  font-weight: 600;
+  font-weight: 590;
+  font-size: 14px;
+  letter-spacing: -0.015em;
   margin: 4px 0 0;
 }
 
@@ -265,14 +380,15 @@ main {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
 }
 
 .thumbnail-wrap img {
   max-width: 160px;
   max-height: 100px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
+  border-radius: 8px;
+  border: 1px solid var(--separator);
+  box-shadow: var(--shadow-sm);
   object-fit: cover;
 }
 
@@ -285,7 +401,7 @@ main {
 .parse-failed {
   background: var(--danger-bg);
   border-radius: var(--radius);
-  padding: 8px;
+  padding: 10px;
   margin-top: 10px;
 }
 
@@ -297,38 +413,37 @@ main {
 
 .parse-failed textarea {
   width: 100%;
-  resize: vertical;
 }
 
 .app-form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .field-row label {
   display: block;
   font-size: 11.5px;
   color: var(--muted);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
 
 .field-row-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
 }
 
 .duplicate-banner {
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  border: 1px solid var(--separator);
   border-radius: var(--radius);
-  padding: 8px;
+  padding: 10px;
 }
 
 .duplicate-banner p {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-size: 12px;
 }
 
@@ -342,20 +457,22 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 /* ---------- List tab ---------- */
 
 .list-toolbar {
   flex-shrink: 0;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   display: flex;
   gap: 6px;
 }
 
 .list-toolbar input {
   flex: 1;
+  border-radius: var(--radius-pill);
+  padding-left: 12px;
 }
 
 .list-status {
@@ -374,16 +491,20 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--accent-soft);
+  border: none;
   border-radius: var(--radius);
-  padding: 6px 8px;
+  padding: 7px 10px;
   font-size: 12px;
+  font-weight: 500;
 }
 
 .table-scroll {
   overflow: auto;
   flex: 1;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius);
+  background: var(--card);
 }
 
 #applications-table {
@@ -395,8 +516,8 @@ main {
 
 #applications-table th,
 #applications-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 5px 6px;
+  border-bottom: 1px solid var(--separator);
+  padding: 7px 9px;
   text-align: left;
   white-space: nowrap;
   max-width: 160px;
@@ -408,33 +529,53 @@ main {
   position: sticky;
   top: 0;
   background: var(--panel);
-  font-weight: 600;
+  font-weight: 590;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+#applications-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 #applications-table tbody tr:hover {
-  background: var(--panel);
+  background: var(--accent-soft);
   cursor: pointer;
 }
 
 #applications-table select {
+  /* Sizes to its longest option instead of inheriting the global
+     `width: 100%`, which clipped the status text in a narrow column. */
+  width: auto;
+  max-width: 100%;
   padding: 2px 4px;
   font-size: 11.5px;
+  border-radius: 5px;
 }
 
 #applications-table a {
   color: var(--accent);
+  text-decoration: none;
+}
+
+#applications-table a:hover {
+  text-decoration: underline;
 }
 
 .status-pill {
   display: inline-block;
-  border-radius: 4px;
-  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 500;
 }
 
-.status-Offered { background: #c6efce; color: #234; }
-.status-Interviewing { background: #ffeb9c; color: #443; }
-.status-Rejected { background: #ffc7ce; color: #433; }
-.status-Ghosted { background: #d9d9d9; color: #333; }
+.status-Offered { background: rgba(52, 199, 89, 0.18); color: var(--success); }
+.status-Interviewing { background: rgba(255, 159, 10, 0.18); color: #b25000; }
+.status-Rejected { background: var(--danger-bg); color: var(--danger); }
+.status-Ghosted { background: var(--control-secondary); color: var(--muted); }
 
 /* ---------- Calendar tab ---------- */
 
@@ -449,15 +590,16 @@ main {
 .cal-month-label {
   flex: 1;
   text-align: center;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 590;
+  letter-spacing: -0.02em;
   margin: 0;
 }
 
 .cal-stats {
   color: var(--muted);
   font-size: 11.5px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   min-height: 15px;
 }
 
@@ -469,16 +611,17 @@ main {
 .cal-days {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 3px;
+  gap: 4px;
 }
 
 .cal-weekdays {
-  margin-bottom: 3px;
+  margin-bottom: 5px;
 }
 
 .cal-weekdays span {
   text-align: center;
   font-size: 10.5px;
+  font-weight: 500;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -489,9 +632,9 @@ main {
   /* Deliberately not square: at the window's 480x600 minimum, square
      cells push the day list off the bottom of the panel. */
   min-height: 38px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
+  border: none;
+  border-radius: 9px;
+  background: var(--bg-sunken);
   color: var(--fg);
   display: flex;
   flex-direction: column;
@@ -500,6 +643,7 @@ main {
   gap: 1px;
   padding: 2px;
   font-family: inherit;
+  transition: transform 0.08s ease, filter 0.12s ease;
 }
 
 .cal-day .cal-day-number {
@@ -508,14 +652,15 @@ main {
 }
 
 .cal-day .cal-day-count {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 12.5px;
+  font-weight: 650;
   line-height: 1;
 }
 
 .cal-day.outside {
   color: var(--muted);
-  opacity: 0.45;
+  background: transparent;
+  opacity: 0.5;
   cursor: default;
 }
 
@@ -526,16 +671,32 @@ main {
 
 .cal-day.has-apps:hover {
   filter: brightness(1.08);
+  transform: scale(1.05);
 }
 
 .cal-day.today {
-  border-color: var(--accent);
-  border-width: 2px;
+  box-shadow: inset 0 0 0 2px var(--accent);
+  font-weight: 650;
+}
+
+/* On a heavily shaded day the accent ring is the same colour as the fill,
+   so today switches to a light ring there. */
+.cal-day.today.level-3,
+.cal-day.today.level-4 {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9);
 }
 
 .cal-day.selected {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.cal-day.today.selected {
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px var(--accent);
+}
+
+.cal-day.today.selected.level-3,
+.cal-day.today.selected.level-4 {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 0 2px var(--accent);
 }
 
 .cal-legend {
@@ -543,7 +704,7 @@ main {
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
-  margin: 8px 0;
+  margin: 10px 0;
   font-size: 10.5px;
   color: var(--muted);
   flex-shrink: 0;
@@ -553,7 +714,7 @@ main {
   width: 11px;
   height: 11px;
   border-radius: 3px;
-  border: 1px solid var(--border);
+  border: none;
   display: inline-block;
 }
 
@@ -564,8 +725,8 @@ main {
 .cal-swatch.level-4 { background: var(--heat-4); }
 
 .cal-day-detail {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
+  border-top: 1px solid var(--separator);
+  padding-top: 10px;
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 110px;
@@ -573,29 +734,32 @@ main {
 
 .cal-day-detail h3 {
   font-size: 12.5px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
   margin: 0 0 6px;
 }
 
 .cal-entry {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
   text-align: left;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--border);
-  padding: 6px 2px;
+  border-radius: var(--radius-sm);
+  padding: 7px 8px;
   color: var(--fg);
   font-size: 12px;
+  transition: background-color 0.12s ease;
 }
 
 .cal-entry:hover {
-  background: var(--panel);
+  background: var(--accent-soft);
 }
 
 .cal-entry .cal-entry-company {
-  font-weight: 600;
+  font-weight: 590;
   white-space: nowrap;
 }
 
@@ -615,19 +779,32 @@ main {
 
 /* ---------- Settings tab ---------- */
 
+/* Grouped inset cards, the way macOS System Settings lays out a pane. */
 .settings-group {
-  margin-bottom: 18px;
+  background: var(--card);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px 14px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
 }
 
 .settings-group h2 {
   font-size: 13px;
-  margin: 0 0 6px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+}
+
+.settings-group label {
+  font-size: 11.5px;
+  color: var(--muted);
 }
 
 .settings-actions {
   display: flex;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 10px;
   align-items: center;
 }
 
@@ -646,12 +823,11 @@ main {
 .update-banner {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
   flex-shrink: 0;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  padding: 8px 10px;
+  background: var(--accent-soft);
+  padding: 10px 14px;
   font-size: 12px;
 }
 
@@ -661,6 +837,11 @@ main {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.update-banner-text strong {
+  font-weight: 590;
+  letter-spacing: -0.01em;
 }
 
 .update-notes {
@@ -679,9 +860,9 @@ main {
 .update-progress {
   height: 4px;
   width: 100%;
-  margin-top: 4px;
-  background: var(--border);
-  border-radius: 2px;
+  margin-top: 6px;
+  background: rgba(120, 120, 128, 0.25);
+  border-radius: var(--radius-pill);
   overflow: hidden;
 }
 
@@ -689,6 +870,7 @@ main {
   height: 100%;
   width: 0;
   background: var(--accent);
+  border-radius: var(--radius-pill);
   transition: width 0.15s linear;
 }
 
@@ -703,17 +885,61 @@ main {
   100% { margin-left: 100%; }
 }
 
+/* ---------- Toggle switch ---------- */
+
 .checkbox-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  margin-top: 4px;
+  gap: 10px;
+  font-size: 12.5px;
+  margin-top: 8px;
 }
 
+/* The iOS switch, drawn entirely from the native checkbox so the control
+   keeps its own semantics, keyboard behaviour, and change event. */
 .checkbox-row input[type="checkbox"] {
-  width: auto;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 38px;
+  height: 22px;
   margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: rgba(120, 120, 128, 0.32);
+  transition: background-color 0.2s ease;
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: var(--shadow-thumb);
+  transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.checkbox-row input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+
+.checkbox-row input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+}
+
+.checkbox-row input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.checkbox-row span {
+  cursor: pointer;
 }
 
 /* ---------- Retry toast ---------- */
@@ -723,16 +949,18 @@ main {
   bottom: 12px;
   left: 12px;
   right: 12px;
-  background: var(--danger-bg);
+  background: var(--card);
   color: var(--fg);
-  border: 1px solid var(--danger);
+  border: 1px solid var(--separator);
+  border-left: 3px solid var(--danger);
   border-radius: var(--radius);
-  padding: 8px 10px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 12px;
   z-index: 50;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
 }
 
 .retry-toast span {
