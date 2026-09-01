@@ -90,6 +90,21 @@
         state.rows[index] = { ...application };
         return null;
       },
+      delete_application_at_index: ({ index, expectedCompany, expectedPosition }) => {
+        const row = state.rows[index];
+        if (!row) throw new Error("That row no longer exists - reload the list and try again.");
+        // Mirrors the Rust guard: the row has to still be the one the user saw.
+        if (
+          row.company.trim().toLowerCase() !== expectedCompany.trim().toLowerCase() ||
+          row.position.trim().toLowerCase() !== expectedPosition.trim().toLowerCase()
+        ) {
+          throw new Error(
+            "That row is now '" + row.company + " - " + row.position + "', not the one you asked to delete."
+          );
+        }
+        state.rows.splice(index, 1);
+        return null;
+      },
       read_clipboard_image: () => null,
       pick_image_file: () => null,
       pick_excel_path: () => null,

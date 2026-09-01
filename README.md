@@ -151,6 +151,7 @@ src-tauri/            Rust backend (the actual application logic)
 scripts/set-version.sh  Bumps the version everywhere it appears, from one command
 src/                    Frontend — plain index.html + styles.css + app.js
     calendar.js           Date math + month/year aggregation behind the Calendar tab
+CLAUDE.md               Repo conventions and traps, for anyone (or anything) editing it
 tests/                  Browser-run frontend tests (no npm, no runner)
   calendar.test.html     Pure-logic tests for src/calendar.js
   ui-harness.html        The real UI with the Tauri bridge mocked, for clicking through
@@ -273,6 +274,15 @@ Change the path from the Settings tab at any time.
 
 - **Edit any saved row.** Click a row in the Applications tab (anywhere
   but the Status dropdown) to reopen it in the full edit form.
+- **Delete a row.** Hover a row and click the &times; on the right. It
+  asks first, and the workbook is backed up before the rewrite, so a
+  mistake is recoverable from `backups/`. Deleting checks that the row is
+  still the one you were looking at, in case the workbook changed in Excel
+  while the app had it listed.
+- **Sort the list.** Click Date, Company, Position, or Status to sort by
+  it; click again to reverse. Newest-first by default, since the workbook
+  itself is append-ordered. Sorting is display-only — it never reorders
+  the rows in the file.
 - **CSV export.** One click in the Applications tab writes a sibling
   `JobApplications.csv` next to the workbook.
 - **Openable links.** The `link` cell in the Applications table opens the

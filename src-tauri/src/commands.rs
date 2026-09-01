@@ -326,6 +326,44 @@ pub fn update_application_at_index<R: tauri::Runtime>(
     excel::write_applications(&path, &rows)
 }
 
+/// Removes a row.
+///
+/// The company and position the user was looking at are passed back in and
+/// checked against the row actually at that index. The workbook is a plain
+/// file the user can edit in Excel while this app is open, so an index alone
+/// is not enough to be sure the right row is being destroyed - and unlike
+/// every other write here, this one has nothing to undo it from inside the
+/// app. (`write_applications` still takes its usual timestamped backup, so a
+/// wrong delete is recoverable from `backups/`.)
+#[tauri::command]
+pub fn delete_application_at_index<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    index: usize,
+    expected_company: String,
+    expected_position: String,
+) -> Result<(), String> {
+    let path = resolve_excel_path(&app)?;
+    let mut rows = excel::read_applications(&path)?;
+
+    let row = rows
+        .get(index)
+        .ok_or_else(|| "That row no longer exists - reload the list and try again.".to_string())?;
+
+    let expected = (
+        expected_company.trim().to_lowercase(),
+        expected_position.trim().to_lowercase(),
+    );
+    if row.dedupe_key() != expected {
+        return Err(format!(
+            "That row is now '{} - {}', not the one you asked to delete. The workbook changed underneath - reload the list and try again.",
+            row.company, row.position
+        ));
+    }
+
+    rows.remove(index);
+    excel::write_applications(&path, &rows)
+}
+
 #[tauri::command]
 pub fn export_csv<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
     let path = resolve_excel_path(&app)?;

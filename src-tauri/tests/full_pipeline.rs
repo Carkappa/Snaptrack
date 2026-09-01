@@ -253,3 +253,90 @@ fn extracts_from_a_real_screenshot() {
         ExtractionResult::ParseFailed { error, .. } => panic!("expected fields, got: {error}"),
     }
 }
+
+/// Deleting is the one write the app can't undo from inside itself, and it
+/// addresses rows by index while the workbook is a file the user can edit in
+/// Excel at the same time. Both halves of that are exercised here.
+#[test]
+fn deleting_a_row_removes_only_that_row() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    let dir = temp_dir_for("delete");
+    let xlsx_path = dir.join("Delete.xlsx");
+    let _ = std::fs::remove_file(&xlsx_path);
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string()).unwrap();
+
+    let mut second = amazon_application();
+    second.company = "Stripe".into();
+    second.position = "Backend Engineer".into();
+    let mut third = amazon_application();
+    third.company = "Figma".into();
+    third.position = "Product Engineer".into();
+
+    for row in [amazon_application(), second, third] {
+        commands::save_application(handle.clone(), row, false).unwrap();
+    }
+    assert_eq!(commands::list_applications(handle.clone()).unwrap().len(), 3);
+
+    // Delete the middle row: the ones on either side must survive, and the
+    // survivors must close up so index 1 is now what index 2 was.
+    commands::delete_application_at_index(
+        handle.clone(),
+        1,
+        "Stripe".into(),
+        "Backend Engineer".into(),
+    )
+    .expect("deleting an existing row should succeed");
+
+    let rows = commands::list_applications(handle.clone()).unwrap();
+    assert_eq!(rows.len(), 2, "exactly one row should be gone");
+    assert_eq!(rows[0].company, "Amazon");
+    assert_eq!(rows[1].company, "Figma", "later rows shift down");
+    assert!(
+        !rows.iter().any(|r| r.company == "Stripe"),
+        "the deleted row must not survive the round-trip through the workbook"
+    );
+}
+
+#[test]
+fn deleting_refuses_when_the_row_is_not_the_one_the_user_saw() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    let dir = temp_dir_for("delete-guard");
+    let xlsx_path = dir.join("DeleteGuard.xlsx");
+    let _ = std::fs::remove_file(&xlsx_path);
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string()).unwrap();
+
+    commands::save_application(handle.clone(), amazon_application(), false).unwrap();
+
+    // The index exists, but the row at it is something else entirely - what
+    // you get if the workbook was re-sorted or edited in Excel meanwhile.
+    let err = commands::delete_application_at_index(
+        handle.clone(),
+        0,
+        "Some Other Company".into(),
+        "Some Other Role".into(),
+    )
+    .expect_err("a mismatched row must be refused");
+    assert!(
+        err.contains("not the one you asked to delete"),
+        "unexpected error: {err}"
+    );
+    assert_eq!(
+        commands::list_applications(handle.clone()).unwrap().len(),
+        1,
+        "a refused delete must leave the workbook untouched"
+    );
+
+    // An index past the end is refused too, rather than panicking.
+    let err = commands::delete_application_at_index(
+        handle.clone(),
+        99,
+        "Amazon".into(),
+        "Whatever".into(),
+    )
+    .expect_err("an out-of-range index must be refused");
+    assert!(err.contains("no longer exists"), "unexpected error: {err}");
+}

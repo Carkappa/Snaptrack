@@ -536,6 +536,73 @@ main {
   letter-spacing: 0.03em;
 }
 
+#applications-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+#applications-table th.sortable:hover {
+  color: var(--fg);
+}
+
+/* The caret only appears on the column actually being sorted by. */
+#applications-table th.sorted::after {
+  content: " ↑";
+  color: var(--accent);
+}
+
+#applications-table th.sorted.desc::after {
+  content: " ↓";
+}
+
+/* The table scrolls sideways, and a delete control you have to go looking
+   for is worse than no delete control. Pin its column to the right edge. */
+#applications-table thead th:last-child,
+#applications-table tbody td:last-child {
+  position: sticky;
+  right: 0;
+  width: 1%;
+  padding-left: 4px;
+  padding-right: 6px;
+  background: var(--card);
+  border-left: 1px solid var(--separator);
+}
+
+#applications-table thead th:last-child {
+  background: var(--panel);
+  z-index: 2;
+}
+
+/* Layer the row-hover tint over the cell's own opaque fill, so the pinned
+   cell highlights with its row instead of showing the rows underneath. */
+#applications-table tbody tr:hover td:last-child {
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--card);
+}
+
+.row-delete {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 5px;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+
+/* Kept out of sight until the row is hovered - it's a destructive control
+   sitting in a table whose rows are otherwise all click-to-edit. */
+#applications-table tbody tr:hover .row-delete,
+.row-delete:focus-visible {
+  opacity: 1;
+}
+
+.row-delete:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
 #applications-table tbody tr:last-child td {
   border-bottom: none;
 }

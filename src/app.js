@@ -57,6 +57,7 @@
     listStats: el("list-stats"),
     exportCsvBtn: el("export-csv-btn"),
     tbody: el("applications-tbody"),
+    sortHeaders: Array.from(document.querySelectorAll("#applications-table th.sortable")),
 
     calPrev: el("cal-prev"),
     calNext: el("cal-next"),
@@ -124,6 +125,10 @@
   let calCursor = { year: calTodayParts.year, month: calTodayParts.month }; // month on screen
   let calSelectedDay = null; // "YYYY-MM-DD" of the day whose entries are listed
   let calView = "month";     // "month" | "year"
+
+  // Applications list ordering. Newest first by default: the workbook is
+  // append-ordered, which puts the row you just saved at the bottom.
+  let listSort = { key: "date_applied", direction: "desc" };
   let calGroups = { byDate: Object.create(null), undated: [] };
 
   function todayIso() {
@@ -171,7 +176,11 @@
   // ---------- Tabs ----------
 
   function activateTab(name) {
-    dom.tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === name));
+    dom.tabButtons.forEach((btn) => {
+      const selected = btn.dataset.tab === name;
+      btn.classList.toggle("active", selected);
+      btn.setAttribute("aria-selected", String(selected));
+    });
     dom.tabPanels.forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${name}`));
     if (name === "list" || name === "calendar") {
       loadApplications();
@@ -533,18 +542,47 @@
       .join(" · ");
   }
 
+  /// Sorts display order only - `index` stays the row's position in the
+  /// workbook, which is what every write command addresses rows by.
+  function sortRows(rows) {
+    const { key, direction } = listSort;
+    const sign = direction === "asc" ? 1 : -1;
+    return rows.slice().sort((a, b) => {
+      const left = (a.app[key] || "").toString().toLowerCase();
+      const right = (b.app[key] || "").toString().toLowerCase();
+      if (left === right) return a.index - b.index; // stable, by workbook order
+      // Dates are ISO, so a plain string compare is already chronological.
+      return left < right ? -sign : sign;
+    });
+  }
+
+  function renderSortIndicators() {
+    for (const th of dom.sortHeaders) {
+      const active = th.dataset.sort === listSort.key;
+      th.classList.toggle("sorted", active);
+      th.classList.toggle("desc", active && listSort.direction === "desc");
+      th.setAttribute(
+        "aria-sort",
+        active ? (listSort.direction === "asc" ? "ascending" : "descending") : "none"
+      );
+    }
+  }
+
   function renderApplicationsTable() {
     renderStats();
+    renderSortIndicators();
     const query = dom.searchBox.value.trim().toLowerCase();
-    const rows = allApplications
-      .map((app, index) => ({ app, index }))
-      .filter(({ app }) => {
-        if (!query) return true;
-        return (
-          (app.company || "").toLowerCase().includes(query) ||
-          (app.position || "").toLowerCase().includes(query)
-        );
-      });
+    const rows = sortRows(
+      allApplications
+        .map((app, index) => ({ app, index }))
+        .filter(({ app }) => {
+          if (!query) return true;
+          return (
+            (app.company || "").toLowerCase().includes(query) ||
+            (app.position || "").toLowerCase().includes(query)
+          );
+        })
+    );
 
     if (rows.length === 0) {
       dom.tbody.innerHTML = "";
@@ -572,6 +610,7 @@
           <td>${escapeHtml(app.job_id)}</td>
           <td>${url}</td>
           <td>${escapeHtml(app.notes)}</td>
+          <td><button type="button" class="row-delete" data-index="${index}" title="Delete this application" aria-label="Delete ${escapeHtml(app.company)} ${escapeHtml(app.position)}">&times;</button></td>
         </tr>`;
       })
       .join("");
@@ -585,6 +624,19 @@
       .join("");
     return `<select data-index="${index}" class="row-status">${options}</select>`;
   }
+
+  dom.sortHeaders.forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      if (listSort.key === key) {
+        listSort.direction = listSort.direction === "asc" ? "desc" : "asc";
+      } else {
+        // Dates open newest-first; names open A-Z.
+        listSort = { key, direction: key === "date_applied" ? "desc" : "asc" };
+      }
+      renderApplicationsTable();
+    });
+  });
 
   dom.tbody.addEventListener("change", async (e) => {
     const target = e.target;
@@ -607,6 +659,24 @@
   });
 
   dom.tbody.addEventListener("click", async (e) => {
+    if (e.target.classList.contains("row-delete")) {
+      e.preventDefault();
+      const index = Number(e.target.dataset.index);
+      const app = allApplications[index];
+      if (!app) return;
+      // Deleting is the one write with no in-app undo, so it asks first.
+      // The workbook is still backed up to backups/ before being rewritten.
+      const ok = window.confirm(
+        `Delete the ${app.company} - ${app.position} application?
+
+` +
+          "The workbook is backed up first, so this can be recovered from the " +
+          "backups folder next to it."
+      );
+      if (!ok) return;
+      await deleteApplication(index, app);
+      return;
+    }
     if (e.target.classList.contains("row-url")) {
       e.preventDefault();
       // Handed to the OS browser rather than navigated to in the webview.
@@ -624,6 +694,23 @@
     if (!row) return;
     enterEditModeFor(Number(row.dataset.index));
   });
+
+  async function deleteApplication(index, app) {
+    try {
+      await invoke("delete_application_at_index", {
+        index,
+        expectedCompany: app.company,
+        expectedPosition: app.position,
+      });
+      // Re-read rather than splicing locally: every other row's index just
+      // shifted, and the calendar is keyed off the same array.
+      await loadApplications();
+      dom.listStatus.textContent = `Deleted ${app.company} - ${app.position}.`;
+    } catch (e) {
+      dom.listStatus.textContent = String(e);
+      showRetryToast(`Couldn't delete that row: ${e}`, () => deleteApplication(index, app));
+    }
+  }
 
   async function loadApplications() {
     dom.listStatus.textContent = "Loading…";
@@ -662,9 +749,11 @@
   function renderCalendar() {
     calGroups = cal.groupByDate(allApplications);
 
-    dom.calViewButtons.forEach((btn) =>
-      btn.classList.toggle("active", btn.dataset.view === calView)
-    );
+    dom.calViewButtons.forEach((btn) => {
+      const selected = btn.dataset.view === calView;
+      btn.classList.toggle("active", selected);
+      btn.setAttribute("aria-selected", String(selected));
+    });
     dom.calGrid.hidden = calView !== "month";
     dom.calYear.hidden = calView !== "year";
 
