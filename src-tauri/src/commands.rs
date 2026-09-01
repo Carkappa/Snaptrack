@@ -11,6 +11,7 @@ const EXCEL_PATH_KEY: &str = "excel_path";
 const EXTRACTION_METHOD_KEY: &str = "extraction_method";
 const DEFAULT_EXTRACTION_METHOD: &str = "tesseract";
 const UPDATE_CHECK_ENABLED_KEY: &str = "update_check_enabled";
+const AUTO_INSTALL_UPDATES_KEY: &str = "auto_install_updates";
 const LAST_UPDATE_CHECK_KEY: &str = "last_update_check";
 
 fn default_excel_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
@@ -423,6 +424,34 @@ pub fn set_update_check_enabled<R: tauri::Runtime>(
         .store(STORE_FILE)
         .map_err(|e| format!("Could not open settings store: {e}"))?;
     store.set(UPDATE_CHECK_ENABLED_KEY, serde_json::json!(enabled));
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))
+}
+
+/// Whether a found update installs itself, or waits for the banner's
+/// button. On by default - the frontend still holds off while there's
+/// unsaved work in the capture form.
+#[tauri::command]
+pub fn get_auto_install_updates<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<bool, String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    Ok(store
+        .get(AUTO_INSTALL_UPDATES_KEY)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true))
+}
+
+#[tauri::command]
+pub fn set_auto_install_updates<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    enabled: bool,
+) -> Result<(), String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    store.set(AUTO_INSTALL_UPDATES_KEY, serde_json::json!(enabled));
     store
         .save()
         .map_err(|e| format!("Could not persist settings: {e}"))

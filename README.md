@@ -9,8 +9,10 @@ for you — reviewed and saved straight into an Excel workbook.
 - **Vanilla HTML/CSS/JS** frontend — no React, no bundler, no `npm install`
 - No background polling, no timers, no server process. The app is inert
   until you invoke it via the tray icon or the global hotkey.
-- **Updates itself.** One check on launch, at most once a day, and
-  nothing installs until you click. Switch it off in Settings.
+- **Updates itself.** One check on launch, at most once a day; a new
+  version downloads and installs on its own, waiting until you have no
+  unsaved entry open. Both the checking and the auto-install are
+  switchable in Settings.
 - Ships as a macOS `.dmg` and a Windows `.msi`/`.exe`.
 
 ## How it works
@@ -134,7 +136,7 @@ src-tauri/            Rust backend (the actual application logic)
     extraction.rs      Anthropic API call + JSON parsing (with tests)
     local_ocr.rs         Tesseract-backed extraction + layout heuristics (with tests)
     excel.rs            xlsx read/write, CSV export, timestamped backups (with tests)
-    updates.rs          Update checking + install via tauri-plugin-updater (with tests)
+    updates.rs          Update check, auto-install, progress events (with tests)
     keychain.rs         API key storage via the keyring crate
     models.rs            Shared data types
   capabilities/         Tauri v2 permission grants for the main window
@@ -273,8 +275,9 @@ Change the path from the Settings tab at any time.
   above the Applications list, computed from what's already loaded.
 - **Calendar.** A month grid shading each day by how many applications
   went out that day, so a slow week is visible at a glance. See below.
-- **Automatic updates.** A banner appears when a newer release is out;
-  one click installs it and restarts. See below.
+- **Automatic updates.** A newer release installs itself and restarts
+  into the new version, with a progress bar and an off switch. See
+  below.
 
 ## Automatic updates
 
@@ -285,16 +288,24 @@ install it in place. This keeps the app's "no background work" promise:
   The check is a single HTTPS request made when the window initialises,
   and it's skipped entirely if one already went out in the last 24
   hours.
-- **Nothing installs on its own.** A new version shows up as a banner
-  above the tabs with its release notes. **Install & restart** downloads
-  it, verifies the signature, installs, and relaunches; **Later**
-  dismisses the banner until the next launch.
-- **Off switch.** Settings → Updates has a "Check for a new version on
-  launch" checkbox and a **Check now** button. Unchecking it stops the
-  automatic check; **Check now** still works when you ask for it.
+- **It installs itself.** By default a found update downloads, verifies
+  its signature, installs, and restarts into the new version without
+  being asked. A banner above the tabs shows the version and a download
+  progress bar throughout, so it's never silent.
+- **It never restarts over your work.** If the capture form has an
+  unsaved entry in it, the install holds off and the banner offers
+  **Install & restart** instead. It goes ahead on its own the moment you
+  save that entry.
+- **Two off switches.** Settings → Updates has "Check for a new version
+  on launch" and "Install updates automatically, without asking".
+  Unchecking the second gives you the ask-first banner; unchecking the
+  first stops the automatic check altogether. **Check now** works either
+  way, and ignores both the once-a-day throttle and the checking
+  preference — you asked for that one explicitly.
 - **Failures are inert.** Offline, endpoint down, or updates not
   configured — the check fails quietly and the app carries on. A failed
-  *install* surfaces the same retry toast as a failed save.
+  *install* puts the banner back into its actionable state and surfaces
+  the same retry toast as a failed save.
 
 ### Setting it up (repo owner, one time)
 

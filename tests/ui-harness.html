@@ -57,6 +57,8 @@
       rows: FIXTURES.map((r) => ({ ...r })),
       calls: [],
       updateCheckEnabled: true,
+      autoInstallUpdates: false, // the harness defaults this off so the fixture UI is clickable
+      listeners: {},
       // Point this at an { outcome: "Available", ... } object to exercise the
       // update banner: window.__harness.updateResponse = { ... }
       updateResponse: { outcome: "UpToDate" },
@@ -91,6 +93,11 @@
       save_screenshot: () => "screenshot.png",
       get_app_version: () => "0.1.0",
       get_update_check_enabled: () => state.updateCheckEnabled,
+      get_auto_install_updates: () => state.autoInstallUpdates,
+      set_auto_install_updates: ({ enabled }) => {
+        state.autoInstallUpdates = enabled;
+        return null;
+      },
       set_update_check_enabled: ({ enabled }) => {
         state.updateCheckEnabled = enabled;
         return null;
@@ -117,8 +124,21 @@
           return handler(args || {});
         },
       },
-      event: { listen: async () => () => {} },
+      event: {
+        listen: async (name, handler) => {
+          (state.listeners[name] || (state.listeners[name] = [])).push(handler);
+          return () => {
+            state.listeners[name] = (state.listeners[name] || []).filter((h) => h !== handler);
+          };
+        },
+      },
       window: { getCurrentWindow: () => ({ hide: () => { state.calls.push({ cmd: "window.hide" }); } }) },
+    };
+    // Stands in for the Rust side emitting an event, so the download-progress
+    // and installing states can be driven from a test:
+    //   window.__harness.emit("update-download-progress", { downloaded: 5, total: 10 })
+    state.emit = (name, payload) => {
+      for (const handler of state.listeners[name] || []) handler({ event: name, payload });
     };
     window.__harness = state;
 

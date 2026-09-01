@@ -33,10 +33,13 @@
   <div id="app" class="app">
     <div id="update-banner" class="update-banner" hidden>
       <div class="update-banner-text">
-        <strong>Version <span id="update-version"></span> is available.</strong>
+        <strong id="update-headline"></strong>
         <span id="update-notes" class="update-notes"></span>
+        <div id="update-progress" class="update-progress" hidden>
+          <div id="update-progress-bar" class="update-progress-bar"></div>
+        </div>
       </div>
-      <div class="update-banner-actions">
+      <div id="update-banner-actions" class="update-banner-actions">
         <button id="update-install" class="btn btn-primary btn-small">Install &amp; restart</button>
         <button id="update-later" class="btn btn-link btn-small">Later</button>
       </div>
@@ -253,6 +256,14 @@
             <input id="settings-update-check" type="checkbox" />
             <span>Check for a new version on launch (at most once a day)</span>
           </label>
+          <label class="checkbox-row">
+            <input id="settings-auto-install" type="checkbox" />
+            <span>Install updates automatically, without asking</span>
+          </label>
+          <p class="hint">
+            Automatic installs wait until you have no unsaved entry open,
+            then restart into the new version.
+          </p>
           <div class="settings-actions">
             <button id="settings-check-update" class="btn btn-secondary">Check now</button>
           </div>

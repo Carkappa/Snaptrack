@@ -118,6 +118,8 @@ pub fn run() {
             commands::get_app_version,
             commands::get_update_check_enabled,
             commands::set_update_check_enabled,
+            commands::get_auto_install_updates,
+            commands::set_auto_install_updates,
             commands::check_for_update,
             commands::install_update,
         ])

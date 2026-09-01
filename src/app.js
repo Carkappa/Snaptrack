@@ -85,9 +85,14 @@
     settingsCheckUpdate: el("settings-check-update"),
     settingsUpdateMessage: el("settings-update-message"),
 
+    settingsAutoInstall: el("settings-auto-install"),
+
     updateBanner: el("update-banner"),
-    updateVersion: el("update-version"),
+    updateHeadline: el("update-headline"),
     updateNotes: el("update-notes"),
+    updateProgress: el("update-progress"),
+    updateProgressBar: el("update-progress-bar"),
+    updateBannerActions: el("update-banner-actions"),
     updateInstall: el("update-install"),
     updateLater: el("update-later"),
 
@@ -103,6 +108,10 @@
   let editingIndex = null; // set when editing an existing row from the list tab
   let currentImage = null; // { base64, mediaType } of the screenshot behind the current form, if any
   let currentExtractionMethod = "tesseract";
+
+  let autoInstallUpdates = true;
+  let updateInstallStarted = false; // guards against a second install kicking off
+  let pendingUpdateVersion = null;   // version the banner is currently offering
 
   const cal = window.JobTrackerCalendar;
   const calTodayParts = cal.todayParts();
@@ -434,6 +443,7 @@
       allApplications[editingIndex] = application;
       resetCaptureArea();
       activateTab("capture");
+      installDeferredUpdate();
     } catch (e) {
       showError(dom.saveError, String(e));
       showRetryToast("Update failed - your entry is still here.", () => attemptUpdate());
@@ -453,6 +463,7 @@
         await saveScreenshotIfPresent(application);
         resetCaptureArea();
         activateTab("capture");
+        installDeferredUpdate();
       } else if (result.outcome === "Duplicate") {
         dom.duplicateStatus.textContent = result.existing_status;
         dom.duplicateBanner.hidden = false;
@@ -480,6 +491,7 @@
       dom.duplicateBanner.hidden = true;
       resetCaptureArea();
       activateTab("capture");
+      installDeferredUpdate();
     } catch (e) {
       showError(dom.saveError, String(e));
       showRetryToast("Update failed - your entry is still here.", () =>
@@ -846,11 +858,83 @@
     dom.settingsUpdateMessage.textContent = message;
   }
 
-  function showUpdateBanner(result) {
-    dom.updateVersion.textContent = result.version;
-    dom.updateNotes.textContent = (result.notes || "").trim();
+  /// True while the capture form holds something the user hasn't saved.
+  /// Automatic installs hold off in that case rather than restarting out
+  /// from under a half-filled entry.
+  function hasUnsavedWork() {
+    if (dom.form.hidden) return false;
+    if (editingIndex !== null) return true;
+    return Boolean(
+      dom.fCompany.value.trim() ||
+        dom.fPosition.value.trim() ||
+        dom.fNotes.value.trim() ||
+        dom.fUrl.value.trim()
+    );
+  }
+
+  function showUpdateBanner(result, note) {
+    pendingUpdateVersion = result.version;
+    dom.updateHeadline.textContent = `Version ${result.version} is available.`;
+    dom.updateNotes.textContent = note || (result.notes || "").trim();
     dom.updateNotes.hidden = !dom.updateNotes.textContent;
+    dom.updateProgress.hidden = true;
+    dom.updateBannerActions.hidden = false;
     dom.updateBanner.hidden = false;
+  }
+
+  function showInstallingBanner(version) {
+    pendingUpdateVersion = version;
+    dom.updateHeadline.textContent = `Installing version ${version}…`;
+    dom.updateNotes.textContent = "The app will restart when it's done.";
+    dom.updateNotes.hidden = false;
+    dom.updateProgressBar.style.width = "0%";
+    dom.updateProgressBar.classList.add("indeterminate");
+    dom.updateProgress.hidden = false;
+    dom.updateBannerActions.hidden = true;
+    dom.updateBanner.hidden = false;
+  }
+
+  listen("update-download-progress", (event) => {
+    const { downloaded, total } = event.payload || {};
+    if (!total) return; // length unknown - leave the indeterminate sweep running
+    const percent = Math.min(100, Math.round((downloaded / total) * 100));
+    dom.updateProgressBar.classList.remove("indeterminate");
+    dom.updateProgressBar.style.width = `${percent}%`;
+    dom.updateNotes.textContent = `Downloaded ${percent}%.`;
+  });
+
+  listen("update-installing", () => {
+    dom.updateProgressBar.classList.remove("indeterminate");
+    dom.updateProgressBar.style.width = "100%";
+    dom.updateNotes.textContent = "Installing - the app will restart in a moment.";
+  });
+
+  /// Downloads, installs, and restarts. Succeeds by never returning.
+  async function runInstall(version) {
+    if (updateInstallStarted) return;
+    updateInstallStarted = true;
+    showInstallingBanner(version);
+    try {
+      await invoke("install_update");
+    } catch (e) {
+      updateInstallStarted = false;
+      dom.updateProgress.hidden = true;
+      dom.updateProgressBar.classList.remove("indeterminate");
+      dom.updateBannerActions.hidden = false;
+      dom.updateHeadline.textContent = `Version ${version} couldn't be installed.`;
+      dom.updateNotes.textContent = String(e);
+      dom.updateNotes.hidden = false;
+      showRetryToast(`Update failed: ${e}`, () => runInstall(version));
+    }
+  }
+
+  /// Called after a successful save: an update that held off because the
+  /// capture form had unsaved work in it can now go ahead.
+  function installDeferredUpdate() {
+    if (!autoInstallUpdates || updateInstallStarted) return;
+    if (!pendingUpdateVersion || dom.updateBanner.hidden) return;
+    if (hasUnsavedWork()) return;
+    runInstall(pendingUpdateVersion);
   }
 
   /// `force` is what the Settings tab's "Check now" passes: it bypasses both
@@ -858,7 +942,16 @@
   /// call leaves it false, so a user who turned checks off is never contacted.
   async function checkForUpdate(force) {
     const result = await invoke("check_for_update", { force });
-    if (result.outcome === "Available") {
+    if (result.outcome !== "Available") return result;
+
+    if (autoInstallUpdates && !hasUnsavedWork()) {
+      runInstall(result.version);
+    } else if (autoInstallUpdates) {
+      showUpdateBanner(
+        result,
+        "Waiting to install until your open entry is saved - or install it now."
+      );
+    } else {
       showUpdateBanner(result);
     }
     return result;
@@ -868,17 +961,8 @@
     dom.updateBanner.hidden = true;
   });
 
-  dom.updateInstall.addEventListener("click", async () => {
-    dom.updateInstall.disabled = true;
-    dom.updateInstall.textContent = "Downloading…";
-    try {
-      // Succeeds by never returning - the app restarts into the new version.
-      await invoke("install_update");
-    } catch (e) {
-      dom.updateInstall.disabled = false;
-      dom.updateInstall.textContent = "Install & restart";
-      showRetryToast(`Update failed: ${e}`, () => dom.updateInstall.click());
-    }
+  dom.updateInstall.addEventListener("click", () => {
+    if (pendingUpdateVersion) runInstall(pendingUpdateVersion);
   });
 
   dom.settingsCheckUpdate.addEventListener("click", async () => {
@@ -887,7 +971,11 @@
     try {
       const result = await checkForUpdate(true);
       if (result.outcome === "Available") {
-        showSettingsUpdateMessage(`Version ${result.version} is available - see the banner at the top.`);
+        showSettingsUpdateMessage(
+          autoInstallUpdates && !hasUnsavedWork()
+            ? `Version ${result.version} is installing now.`
+            : `Version ${result.version} is available - see the banner at the top.`
+        );
       } else if (result.outcome === "UpToDate") {
         showSettingsUpdateMessage("You're on the latest version.");
       } else {
@@ -908,6 +996,15 @@
     }
   });
 
+  dom.settingsAutoInstall.addEventListener("change", async () => {
+    autoInstallUpdates = dom.settingsAutoInstall.checked;
+    try {
+      await invoke("set_auto_install_updates", { enabled: autoInstallUpdates });
+    } catch (e) {
+      showSettingsUpdateMessage(String(e));
+    }
+  });
+
   async function loadUpdateSettings() {
     try {
       dom.settingsVersion.textContent = await invoke("get_app_version");
@@ -919,6 +1016,12 @@
     } catch (_) {
       dom.settingsUpdateCheck.checked = true;
     }
+    try {
+      autoInstallUpdates = await invoke("get_auto_install_updates");
+    } catch (_) {
+      autoInstallUpdates = true;
+    }
+    dom.settingsAutoInstall.checked = autoInstallUpdates;
   }
 
   // ---------- Global hotkey / Esc ----------

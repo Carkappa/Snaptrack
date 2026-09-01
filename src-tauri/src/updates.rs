@@ -10,7 +10,7 @@
 //! installed without the user clicking the button.
 
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 /// Placeholder shipped in `tauri.conf.json`. Until the repo owner generates a
@@ -37,6 +37,18 @@ pub enum UpdateCheck {
     /// last day, or updates were never configured for this build.
     Skipped { reason: String },
 }
+
+/// Emitted repeatedly while an update downloads, so the banner can show
+/// progress instead of sitting on "Downloading..." - which matters more now
+/// that an install can start without the user having clicked anything.
+#[derive(Debug, Clone, Serialize)]
+pub struct DownloadProgress {
+    pub downloaded: u64,
+    pub total: Option<u64>,
+}
+
+pub const PROGRESS_EVENT: &str = "update-download-progress";
+pub const INSTALLING_EVENT: &str = "update-installing";
 
 fn updater_is_configured<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
     serde_json::to_value(&app.config().plugins)
@@ -127,8 +139,26 @@ pub async fn install<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(),
         .map_err(|e| format!("Couldn't check for updates: {e}"))?
         .ok_or_else(|| "There's no update to install - you're on the latest version.".to_string())?;
 
+    let progress_handle = app.clone();
+    let finished_handle = app.clone();
+    let mut downloaded: u64 = 0;
+
     update
-        .download_and_install(|_chunk, _total| {}, || {})
+        .download_and_install(
+            move |chunk_len, total| {
+                downloaded += chunk_len as u64;
+                let _ = progress_handle.emit(
+                    PROGRESS_EVENT,
+                    DownloadProgress {
+                        downloaded,
+                        total,
+                    },
+                );
+            },
+            move || {
+                let _ = finished_handle.emit(INSTALLING_EVENT, ());
+            },
+        )
         .await
         .map_err(|e| format!("Couldn't install the update: {e}"))?;
 
