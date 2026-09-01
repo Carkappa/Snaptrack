@@ -36,6 +36,16 @@
   --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.05);
   --shadow-thumb: 0 3px 8px rgba(0, 0, 0, 0.12), 0 1px 1px rgba(0, 0, 0, 0.04);
 
+  /* One colour per status, shared by the summary chips, the meters and the
+     donut, so those three can never disagree about what a status looks like. */
+  --st-applied: #0a84ff;
+  --st-interviewing: #ff9f0a;
+  --st-offered: #30d158;
+  --st-rejected: #ff453a;
+  --st-ghosted: #8e8e93;
+  --st-withdrawn: #bf5af2;
+  --st-other: #64d2ff;
+
   --heat-0: #ececf0;
   --heat-1: #d3e6ff;
   --heat-2: #9dc8ff;
@@ -644,6 +654,248 @@ main {
 .status-Rejected { background: var(--danger-bg); color: var(--danger); }
 .status-Ghosted { background: var(--control-secondary); color: var(--muted); }
 
+/* ---------- Panels, section labels, dense rows ----------
+   The vocabulary the Stats popups are built from: a bordered panel, a hero
+   figure at the top, faint centred labels dividing sections, and rows of
+   colour chip -> label -> right-aligned value. Used by the Applications
+   summary and the Calendar's figures. */
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px 10px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 0 10px;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 590;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.panel-chevron {
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 0.18s ease;
+}
+
+.panel.collapsed .panel-chevron {
+  transform: rotate(-45deg) translate(-1px, 1px);
+}
+
+.panel.collapsed .panel-body {
+  display: none;
+}
+
+.panel.collapsed .panel-header {
+  padding-bottom: 0;
+}
+
+.panel-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.hero-ring {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  flex-shrink: 0;
+}
+
+.hero-ring svg {
+  width: 76px;
+  height: 76px;
+  /* Start the first arc at 12 o'clock rather than 3. */
+  transform: rotate(-90deg);
+}
+
+.donut-track {
+  fill: none;
+  stroke: var(--control-secondary);
+  stroke-width: 10;
+}
+
+.donut-arc {
+  fill: none;
+  stroke-width: 10;
+  transition: stroke-dasharray 0.25s ease, stroke-dashoffset 0.25s ease;
+}
+
+.hero-ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  pointer-events: none;
+}
+
+.hero-ring-label strong {
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.hero-ring-label span {
+  font-size: 9.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.hero-figures {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  min-width: 0;
+}
+
+.hero-figures > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hero-figures dt {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.hero-figures dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 590;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A faint centred caption with a rule through it, dividing one block of
+   figures from the next. */
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+.section-label::before,
+.section-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--separator);
+}
+
+.detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.detail-row {
+  display: grid;
+  grid-template-columns: 9px minmax(64px, max-content) 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  min-height: 17px;
+}
+
+.detail-row.muted {
+  opacity: 0.45;
+}
+
+.detail-chip {
+  width: 9px;
+  height: 9px;
+  border-radius: 2.5px;
+  background: var(--muted);
+}
+
+.detail-label {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 590;
+  text-align: right;
+  min-width: 22px;
+}
+
+.detail-share {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  text-align: right;
+  min-width: 34px;
+}
+
+/* The proportion bar that sits between the label and the numbers. */
+.meter {
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--control-secondary);
+  overflow: hidden;
+  min-width: 30px;
+}
+
+.meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  transition: width 0.25s ease;
+}
+
+/* Status colours, applied to whichever element carries the class. */
+.st-Applied { background: var(--st-applied); }
+.st-Interviewing { background: var(--st-interviewing); }
+.st-Offered { background: var(--st-offered); }
+.st-Rejected { background: var(--st-rejected); }
+.st-Ghosted { background: var(--st-ghosted); }
+.st-Withdrawn { background: var(--st-withdrawn); }
+.st-other { background: var(--st-other); }
+
+.donut-arc.st-Applied { stroke: var(--st-applied); background: none; }
+.donut-arc.st-Interviewing { stroke: var(--st-interviewing); background: none; }
+.donut-arc.st-Offered { stroke: var(--st-offered); background: none; }
+.donut-arc.st-Rejected { stroke: var(--st-rejected); background: none; }
+.donut-arc.st-Ghosted { stroke: var(--st-ghosted); background: none; }
+.donut-arc.st-Withdrawn { stroke: var(--st-withdrawn); background: none; }
+.donut-arc.st-other { stroke: var(--st-other); background: none; }
+
 /* ---------- Calendar tab ---------- */
 
 .cal-toolbar {
@@ -664,10 +916,35 @@ main {
 }
 
 .cal-stats {
-  color: var(--muted);
-  font-size: 11.5px;
-  margin-bottom: 10px;
+  /* .hero-figures sets `flex: 1`, which in this column-flex panel collapses
+     the strip to nothing and lets it overflow onto the weekday row. */
+  flex: none;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin: 0 0 12px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--separator);
   min-height: 15px;
+}
+
+.cal-stats > div {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  justify-content: flex-start;
+}
+
+.cal-stats dt {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cal-stats dd {
+  font-size: 14px;
+  letter-spacing: -0.02em;
 }
 
 .cal-grid {

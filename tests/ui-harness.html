@@ -2,9 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <!-- These are dev pages edited constantly; a cached copy reads as a bug
+       in the code you just changed. -->
+  <meta http-equiv="Cache-Control" content="no-store" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Job Tracker UI harness</title>
-  <link rel="stylesheet" href="../src/styles.css" />
+  <link id="app-styles" rel="stylesheet" href="../src/styles.css" />
   <style>
     /* The harness runs the real UI inside a window-sized frame so the
        layout is the same one the Tauri webview gets. */
@@ -169,10 +172,15 @@
 
     // ---- Load the real UI --------------------------------------------------
 
+    // Every load is cache-busted. Without it a browser will happily keep
+    // serving the previous app.js or styles.css after an edit, which reads
+    // as a bug in the code you just changed.
+    const fresh = (url) => url + (url.includes("?") ? "&" : "?") + "t=" + Date.now();
+
     function loadScript(src) {
       return new Promise((resolve, reject) => {
         const s = document.createElement("script");
-        s.src = src;
+        s.src = fresh(src);
         s.onload = resolve;
         s.onerror = () => reject(new Error("failed to load " + src));
         document.body.appendChild(s);
@@ -182,11 +190,14 @@
     (async () => {
       const status = document.getElementById("harness-status");
       try {
-        const html = await fetch("../src/index.html").then((r) => r.text());
+        const styles = document.getElementById("app-styles");
+        styles.href = fresh(styles.getAttribute("href").split("?")[0]);
+        const html = await fetch(fresh("../src/index.html")).then((r) => r.text());
         const doc = new DOMParser().parseFromString(html, "text/html");
         doc.querySelectorAll("script").forEach((s) => s.remove());
         document.getElementById("app-frame").innerHTML = doc.body.innerHTML;
 
+        await loadScript("../src/stats.js");
         await loadScript("../src/calendar.js");
         await loadScript("../src/app.js");
         status.textContent = "ready";

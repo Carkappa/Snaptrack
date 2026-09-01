@@ -151,9 +151,11 @@ src-tauri/            Rust backend (the actual application logic)
 scripts/set-version.sh  Bumps the version everywhere it appears, from one command
 src/                    Frontend — plain index.html + styles.css + app.js
     calendar.js           Date math + month/year aggregation behind the Calendar tab
+    stats.js              Status breakdown, response rate, donut arcs (Applications tab)
 CLAUDE.md               Repo conventions and traps, for anyone (or anything) editing it
 tests/                  Browser-run frontend tests (no npm, no runner)
   calendar.test.html     Pure-logic tests for src/calendar.js
+  stats.test.html        Pure-logic tests for src/stats.js
   ui-harness.html        The real UI with the Tauri bridge mocked, for clicking through
 .github/workflows/      CI: Rust + frontend tests on every push, installers on a tag
 ```
@@ -235,8 +237,12 @@ python3 -m http.server 8000
   values), leap years, the 6x7 month grid and the 53-week year grid with
   their padding, heat-level scaling, per-month and per-year totals,
   streaks across month boundaries, and year wrapping. The page title reads
-  `PASS n/n` or `FAIL n/n`, with a per-test list. **This one also runs in
-  CI**, in headless Chrome, so a red result fails the build.
+  `PASS n/n` or `FAIL n/n`, with a per-test list.
+- <http://localhost:8000/tests/stats.test.html> — the status breakdown,
+  the response rate (silence vs. a reply, with withdrawn applications
+  excluded from both sides), and the donut geometry.
+  Both of the above **run in CI** in headless Chrome, so a red result
+  fails the build.
 - <http://localhost:8000/tests/ui-harness.html> — the real `index.html`
   and `app.js`, with `window.__TAURI__` replaced by a mock that serves
   fixture rows. Every tab, the capture form, the save flow, and the
@@ -283,6 +289,9 @@ Change the path from the Settings tab at any time.
   it; click again to reverse. Newest-first by default, since the workbook
   itself is append-ordered. Sorting is display-only — it never reorders
   the rows in the file.
+- **Overview panel.** Above the list: a donut of where every application
+  stands, your response rate, and a breakdown of each status with a bar
+  and a share. Collapsible — click the heading — and it remembers.
 - **CSV export.** One click in the Applications tab writes a sibling
   `JobApplications.csv` next to the workbook.
 - **Openable links.** The `link` cell in the Applications table opens the

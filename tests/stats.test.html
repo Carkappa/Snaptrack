@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- These are dev pages edited constantly; a cached copy reads as a bug
+       in the code you just changed. -->
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <title>Stats logic tests</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 13px; margin: 16px; }
+    #summary { font-weight: 700; font-size: 15px; margin-bottom: 10px; }
+    #summary.pass { color: #15803d; }
+    #summary.fail { color: #b91c1c; }
+    li { margin-bottom: 2px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    li.fail { color: #b91c1c; }
+    li.pass { color: #15803d; }
+  </style>
+</head>
+<body>
+  <h1>Stats logic tests</h1>
+  <p>Pure-function tests for <code>src/stats.js</code>, which feeds the
+     summary panel on the Applications tab.</p>
+  <div id="summary">Running&hellip;</div>
+  <ul id="results"></ul>
+
+  <script src="../src/stats.js"></script>
+  <script>
+    (() => {
+      "use strict";
+      const stats = window.JobTrackerStats;
+      const results = [];
+
+      function test(name, fn) {
+        try {
+          fn();
+          results.push({ name, ok: true });
+        } catch (e) {
+          results.push({ name, ok: false, error: String(e && e.message ? e.message : e) });
+        }
+      }
+
+      function eq(actual, expected, what) {
+        const a = JSON.stringify(actual);
+        const b = JSON.stringify(expected);
+        if (a !== b) throw new Error((what || "value") + ": expected " + b + ", got " + a);
+      }
+
+      function close(actual, expected, what) {
+        if (Math.abs(actual - expected) > 1e-9) {
+          throw new Error((what || "value") + ": expected " + expected + ", got " + actual);
+        }
+      }
+
+      function ok(cond, what) {
+        if (!cond) throw new Error(what || "expected truthy");
+      }
+
+      const apps = (statuses) => statuses.map((status, i) => ({
+        company: "Co" + i, position: "Role" + i, status,
+      }));
+
+      // ---- statusBreakdown ----
+
+      test("statusBreakdown counts every status in display order", () => {
+        const b = stats.statusBreakdown(apps([
+          "Applied", "Applied", "Interviewing", "Offered", "Rejected", "Ghosted", "Withdrawn",
+        ]));
+        eq(b.total, 7);
+        eq(b.segments.map((s) => s.status), stats.STATUS_ORDER);
+        eq(b.segments.map((s) => s.count), [2, 1, 1, 1, 1, 1]);
+      });
+
+      test("statusBreakdown reports each status's share of the total", () => {
+        const b = stats.statusBreakdown(apps(["Applied", "Applied", "Offered", "Rejected"]));
+        const share = (name) => b.segments.find((s) => s.status === name).share;
+        close(share("Applied"), 0.5);
+        close(share("Offered"), 0.25);
+        close(share("Ghosted"), 0);
+      });
+
+      test("statusBreakdown keeps a status the app doesn't know about", () => {
+        // The Status column is a plain cell - someone can type into it.
+        const b = stats.statusBreakdown(apps(["Applied", "Pending signature"]));
+        eq(b.total, 2);
+        const extra = b.segments.find((s) => s.status === "Pending signature");
+        ok(extra, "the unknown status should survive");
+        eq(extra.count, 1);
+        eq(extra.known, false);
+        eq(
+          b.segments.reduce((n, s) => n + s.count, 0),
+          2,
+          "the counts must still add up to the row count"
+        );
+        eq(
+          b.segments.slice(0, 6).map((s) => s.status),
+          stats.STATUS_ORDER,
+          "known statuses stay first, in order"
+        );
+      });
+
+      test("statusBreakdown treats a blank status as Applied", () => {
+        const b = stats.statusBreakdown([
+          { company: "A", position: "1", status: "" },
+          { company: "B", position: "2", status: "   " },
+          { company: "C", position: "3" },
+        ]);
+        eq(b.segments.find((s) => s.status === "Applied").count, 3);
+        eq(b.total, 3);
+      });
+
+      test("statusBreakdown handles an empty or missing list", () => {
+        for (const input of [[], null, undefined]) {
+          const b = stats.statusBreakdown(input);
+          eq(b.total, 0);
+          eq(b.segments.map((s) => s.count), [0, 0, 0, 0, 0, 0]);
+          eq(b.segments.every((s) => s.share === 0), true, "no division by zero");
+        }
+      });
+
+      // ---- responseRate ----
+
+      test("responseRate counts interviews, offers and rejections as replies", () => {
+        const r = stats.responseRate(apps([
+          "Applied", "Applied", "Interviewing", "Offered", "Rejected",
+        ]));
+        eq(r.responded, 3);
+        eq(r.considered, 5);
+        close(r.rate, 0.6);
+      });
+
+      test("responseRate treats silence as no reply", () => {
+        const r = stats.responseRate(apps(["Applied", "Ghosted"]));
+        eq(r.responded, 0);
+        eq(r.considered, 2);
+        close(r.rate, 0);
+      });
+
+      test("responseRate excludes applications you withdrew, from both sides", () => {
+        const r = stats.responseRate(apps(["Withdrawn", "Withdrawn", "Offered", "Applied"]));
+        eq(r.considered, 2, "withdrawn rows are not waiting on anyone");
+        eq(r.responded, 1);
+        close(r.rate, 0.5);
+      });
+
+      test("responseRate is 0 rather than NaN with nothing to divide by", () => {
+        for (const input of [[], null, apps(["Withdrawn"])]) {
+          const r = stats.responseRate(input);
+          eq(r.rate, 0);
+          ok(!Number.isNaN(r.rate), "must not be NaN");
+        }
+      });
+
+      // ---- donutSegments ----
+
+      test("donutSegments drops empty statuses so there are no seams", () => {
+        const b = stats.statusBreakdown(apps(["Applied", "Offered"]));
+        const arcs = stats.donutSegments(b, 20);
+        eq(arcs.map((a) => a.status), ["Applied", "Offered"]);
+      });
+
+      test("donutSegments arcs add up to the full circle", () => {
+        const b = stats.statusBreakdown(apps([
+          "Applied", "Applied", "Applied", "Interviewing", "Offered", "Rejected",
+        ]));
+        const radius = 20;
+        const arcs = stats.donutSegments(b, radius);
+        const circumference = 2 * Math.PI * radius;
+        close(
+          arcs.reduce((n, a) => n + a.length, 0),
+          circumference,
+          "arc lengths"
+        );
+        arcs.forEach((a) => close(a.length + a.gap, circumference, a.status + " dash+gap"));
+      });
+
+      test("donutSegments lays arcs end to end", () => {
+        const b = stats.statusBreakdown(apps(["Applied", "Offered", "Rejected"]));
+        const arcs = stats.donutSegments(b, 20);
+        eq(arcs[0].offset, -0, "the first arc starts at zero");
+        close(-arcs[1].offset, arcs[0].length, "the second starts where the first ended");
+        close(-arcs[2].offset, arcs[0].length + arcs[1].length, "and so on");
+      });
+
+      test("a single status fills the whole ring", () => {
+        const b = stats.statusBreakdown(apps(["Applied", "Applied"]));
+        const arcs = stats.donutSegments(b, 20);
+        eq(arcs.length, 1);
+        close(arcs[0].length, 2 * Math.PI * 20);
+        close(arcs[0].gap, 0);
+      });
+
+      test("donutSegments on an empty breakdown draws nothing", () => {
+        eq(stats.donutSegments(stats.statusBreakdown([]), 20), []);
+      });
+
+      // ---- percent ----
+
+      test("percent rounds for display", () => {
+        eq(stats.percent(0), "0%");
+        eq(stats.percent(1), "100%");
+        eq(stats.percent(0.5), "50%");
+        eq(stats.percent(0.333), "33%");
+      });
+
+      test("percent never rounds a real share down to zero", () => {
+        eq(stats.percent(0.001), "<1%", "1 in 1000 is not none");
+        eq(stats.percent(0.004), "<1%");
+      });
+
+      // ---- report ----
+
+      const failed = results.filter((r) => !r.ok);
+      const summary = document.getElementById("summary");
+      summary.textContent = failed.length === 0
+        ? "All " + results.length + " tests passed."
+        : failed.length + " of " + results.length + " tests FAILED.";
+      summary.className = failed.length === 0 ? "pass" : "fail";
+      document.title = (failed.length === 0 ? "PASS " : "FAIL ") + (results.length - failed.length) + "/" + results.length;
+      document.getElementById("results").innerHTML = results
+        .map((r) => '<li class="' + (r.ok ? "pass" : "fail") + '">' +
+                    (r.ok ? "PASS" : "FAIL") + " - " + r.name +
+                    (r.ok ? "" : "<br>&nbsp;&nbsp;&nbsp;&nbsp;" + r.error) + "</li>")
+        .join("");
+      window.__testResults = { total: results.length, failed: failed.length, results };
+    })();
+  </script>
+</body>
+</html>

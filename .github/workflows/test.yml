@@ -51,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run the calendar tests in headless Chrome
+      - name: Run the frontend tests in headless Chrome
         run: |
           set -euo pipefail
           python3 -m http.server 8000 --bind 127.0.0.1 &
@@ -63,13 +63,17 @@ jobs:
           done
 
           chrome_args="--headless=new --disable-gpu --no-sandbox --virtual-time-budget=10000"
-          google-chrome $chrome_args --dump-dom http://127.0.0.1:8000/tests/calendar.test.html > dom.html
 
-          if grep -qE 'All [0-9]+ tests passed' dom.html; then
-            grep -oE 'All [0-9]+ tests passed' dom.html
-          else
-            echo "::error::Frontend calendar tests failed"
-            grep -oE '<div id="summary"[^>]*>[^<]*' dom.html || true
-            grep -oE '<li class="fail">.*?</li>' dom.html || true
-            exit 1
-          fi
+          failed=0
+          for page in calendar stats; do
+            google-chrome $chrome_args --dump-dom "http://127.0.0.1:8000/tests/$page.test.html" > "$page.html"
+            if grep -qE 'All [0-9]+ tests passed' "$page.html"; then
+              echo "$page: $(grep -oE 'All [0-9]+ tests passed' "$page.html")"
+            else
+              echo "::error::Frontend $page tests failed"
+              grep -oE '<div id="summary"[^>]*>[^<]*' "$page.html" || true
+              grep -oE '<li class="fail">.*?</li>' "$page.html" || true
+              failed=1
+            fi
+          done
+          exit $failed

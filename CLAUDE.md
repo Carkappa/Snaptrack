@@ -33,11 +33,12 @@ suites on every push, and both must be green.
 
 ```bash
 cd src-tauri && cargo test          # Rust: unit + integration
-python3 -m http.server 8000         # then open the two pages below
+python3 -m http.server 8000         # then open the pages below
 ```
 
-- `tests/calendar.test.html` — pure-logic tests for `src/calendar.js`. Page
-  title reads `PASS n/n`. **This runs in CI** in headless Chrome.
+- `tests/calendar.test.html` and `tests/stats.test.html` — pure-logic tests
+  for `src/calendar.js` and `src/stats.js`. Page title reads `PASS n/n`.
+  **Both run in CI** in headless Chrome.
 - `tests/ui-harness.html` — the real `index.html` and `app.js` with
   `window.__TAURI__` mocked. Every tab, form, and flow is clickable without
   building the app. Drive it from the browser console or a browser tool;
@@ -45,9 +46,26 @@ python3 -m http.server 8000         # then open the two pages below
   (`installUpdateFails`, `openUrlFails`), and `emit()` for Rust-side events.
   Not automated — it is a manual tool.
 
-When you touch `calendar.js`, add to `calendar.test.html`. When you touch a
-command, prefer a unit test next to it, or `src-tauri/tests/full_pipeline.rs`
-if it needs a real `AppHandle` and workbook.
+When you touch `calendar.js` or `stats.js`, add to the matching test page
+(and to the `for page in ...` loop in the workflow if you add another). When
+you touch a command, prefer a unit test next to it, or
+`src-tauri/tests/full_pipeline.rs` if it needs a real `AppHandle` and workbook.
+
+## Look and feel
+
+Two references, deliberately. Apple's system design for the chrome — system
+accent blue, hairline separators, segmented controls, grouped inset cards,
+iOS switches. And [exelban/stats][stats] for information display: a hero
+figure, faint centred section labels, and dense rows of colour chip ->
+label -> meter -> value. `.panel`, `.section-label`, `.detail-row` and
+`.meter` in `styles.css` are that vocabulary — reuse them rather than
+inventing a third style.
+
+Status colours live in one place (the `--st-*` tokens) and are keyed off
+`stats.js`'s `STATUS_ORDER`, so the chips, meters and donut cannot disagree
+about what a status looks like.
+
+[stats]: https://github.com/exelban/stats
 
 ## Things that will bite you
 
@@ -68,5 +86,9 @@ if it needs a real `AppHandle` and workbook.
 - **Updates are unsigned until a key exists.** `tauri.conf.json` carries a
   placeholder `pubkey`; `updates.rs` detects it and reports that plainly
   instead of failing with a signature error. See the README for the setup.
+- **Browsers cache the test pages hard.** All three carry a `no-store` meta
+  and the harness cache-busts its own sub-resources. Without that, an edit to
+  `app.js` or `styles.css` shows up as a phantom bug in the code you just
+  changed — this cost real debugging time twice.
 - **Don't use `cargo test --verbose` in CI.** It prints a full rustc
   invocation per crate and buries the actual error.

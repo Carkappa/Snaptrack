@@ -58,6 +58,14 @@
     exportCsvBtn: el("export-csv-btn"),
     tbody: el("applications-tbody"),
     sortHeaders: Array.from(document.querySelectorAll("#applications-table th.sortable")),
+    summaryPanel: el("summary-panel"),
+    summaryToggle: el("summary-toggle"),
+    summaryDonutArcs: el("summary-donut-arcs"),
+    summaryTotal: el("summary-total"),
+    summaryResponseRate: el("summary-response-rate"),
+    summaryResponded: el("summary-responded"),
+    summaryWaiting: el("summary-waiting"),
+    summaryRows: el("summary-rows"),
 
     calPrev: el("cal-prev"),
     calNext: el("cal-next"),
@@ -120,6 +128,7 @@
   let updateInstallStarted = false; // guards against a second install kicking off
   let pendingUpdateVersion = null;   // version the banner is currently offering
 
+  const statsLib = window.JobTrackerStats;
   const cal = window.JobTrackerCalendar;
   const calTodayParts = cal.todayParts();
   let calCursor = { year: calTodayParts.year, month: calTodayParts.month }; // month on screen
@@ -528,18 +537,46 @@
     return div.innerHTML;
   }
 
+  /// Class carrying a status's colour. Unknown statuses - someone typed into
+  /// the Status cell - share one fallback colour rather than going invisible.
+  function statusClass(status) {
+    return statsLib.STATUS_ORDER.includes(status) ? `st-${status}` : "st-other";
+  }
+
   function renderStats() {
-    if (allApplications.length === 0) {
-      dom.listStats.textContent = "";
-      return;
-    }
-    const counts = {};
-    for (const app of allApplications) {
-      counts[app.status] = (counts[app.status] || 0) + 1;
-    }
-    dom.listStats.textContent = Object.entries(counts)
-      .map(([status, count]) => `${count} ${status}`)
-      .join(" · ");
+    const breakdown = statsLib.statusBreakdown(allApplications);
+    const response = statsLib.responseRate(allApplications);
+
+    dom.summaryTotal.textContent = String(breakdown.total);
+    dom.summaryResponseRate.textContent = statsLib.percent(response.rate);
+    dom.summaryResponded.textContent = String(response.responded);
+    dom.summaryWaiting.textContent = String(response.considered - response.responded);
+
+    const radius = 34;
+    dom.summaryDonutArcs.innerHTML = statsLib
+      .donutSegments(breakdown, radius)
+      .map(
+        (arc) =>
+          `<circle class="donut-arc ${statusClass(arc.status)}" cx="42" cy="42" r="${radius}"
+             stroke-dasharray="${arc.length} ${arc.gap}" stroke-dashoffset="${arc.offset}" />`
+      )
+      .join("");
+
+    // Meters are scaled against the biggest status, not the total, so a
+    // spread-out set of statuses doesn't render as six near-empty bars.
+    const busiest = breakdown.segments.reduce((n, seg) => Math.max(n, seg.count), 0);
+    dom.summaryRows.innerHTML = breakdown.segments
+      .map((seg) => {
+        const width = busiest ? (seg.count / busiest) * 100 : 0;
+        return `<div class="detail-row${seg.count === 0 ? " muted" : ""}">
+          <i class="detail-chip ${statusClass(seg.status)}"></i>
+          <span class="detail-label">${escapeHtml(seg.status)}</span>
+          <span class="meter"><span class="meter-fill ${statusClass(seg.status)}" style="width: ${width}%"></span></span>
+          <span class="detail-value">${seg.count}</span>
+          <span class="detail-share">${statsLib.percent(seg.share)}</span>
+        </div>`;
+      })
+      .join("");
   }
 
   /// Sorts display order only - `index` stays the row's position in the
@@ -623,6 +660,33 @@
       .map((s) => `<option value="${s}" ${s === current ? "selected" : ""}>${s}</option>`)
       .join("");
     return `<select data-index="${index}" class="row-status">${options}</select>`;
+  }
+
+  const SUMMARY_COLLAPSED_KEY = "jobTracker.summaryCollapsed";
+
+  function applySummaryCollapsed(collapsed) {
+    dom.summaryPanel.classList.toggle("collapsed", collapsed);
+    dom.summaryToggle.setAttribute("aria-expanded", String(!collapsed));
+  }
+
+  dom.summaryToggle.addEventListener("click", () => {
+    const collapsed = !dom.summaryPanel.classList.contains("collapsed");
+    applySummaryCollapsed(collapsed);
+    try {
+      window.localStorage.setItem(SUMMARY_COLLAPSED_KEY, collapsed ? "1" : "0");
+    } catch (_) {
+      // A blocked or full store just means the choice lasts this session.
+    }
+  });
+
+  function restoreSummaryCollapsed() {
+    let collapsed = false;
+    try {
+      collapsed = window.localStorage.getItem(SUMMARY_COLLAPSED_KEY) === "1";
+    } catch (_) {
+      /* default to open */
+    }
+    applySummaryCollapsed(collapsed);
   }
 
   dom.sortHeaders.forEach((th) => {
@@ -802,19 +866,11 @@
       })
       .join("");
 
-    const stats = cal.monthStats(year, month, byDate);
-    const streak = cal.currentStreak(byDate, calTodayParts);
-    const parts = [
-      `${stats.total} application${stats.total === 1 ? "" : "s"} this month`,
-      `${stats.activeDays} active day${stats.activeDays === 1 ? "" : "s"}`,
-    ];
-    if (stats.busiest) {
-      parts.push(`busiest ${cal.dayLabel(stats.busiest.iso)} (${stats.busiest.count})`);
-    }
-    if (streak > 0) {
-      parts.push(`${streak}-day streak`);
-    }
-    dom.calStats.textContent = parts.join(" · ");
+    renderCalendarFigures(
+      cal.monthStats(year, month, byDate),
+      cal.currentStreak(byDate, calTodayParts),
+      "This month"
+    );
   }
 
   function renderYearView() {
@@ -848,19 +904,28 @@
 
     scrollYearIntoView();
 
-    const stats = cal.yearStats(year, byDate);
-    const streak = cal.currentStreak(byDate, calTodayParts);
-    const parts = [
-      `${stats.total} application${stats.total === 1 ? "" : "s"} in ${year}`,
-      `${stats.activeDays} active day${stats.activeDays === 1 ? "" : "s"}`,
+    renderCalendarFigures(
+      cal.yearStats(year, byDate),
+      cal.currentStreak(byDate, calTodayParts),
+      String(year)
+    );
+  }
+
+  /// The month and year views show the same four figures, as labelled
+  /// values rather than a run-on sentence.
+  function renderCalendarFigures(figures, streak, periodLabel) {
+    const cells = [
+      [periodLabel, figures.total],
+      ["Active days", figures.activeDays],
+      ["Busiest day", figures.busiest ? figures.busiest.count : 0],
+      ["Streak", streak],
     ];
-    if (stats.busiest) {
-      parts.push(`busiest ${cal.dayLabel(stats.busiest.iso)} (${stats.busiest.count})`);
-    }
-    if (streak > 0) {
-      parts.push(`${streak}-day streak`);
-    }
-    dom.calStats.textContent = parts.join(" · ");
+    dom.calStats.innerHTML = cells
+      .map(
+        ([label, value]) =>
+          `<div><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`
+      )
+      .join("");
   }
 
   function renderDayDetail() {
@@ -1250,6 +1315,7 @@
 
   async function init() {
     applyPlatformHints();
+    restoreSummaryCollapsed();
     resetCaptureArea();
     await populateStatusDropdown();
     await loadExtractionMethod();

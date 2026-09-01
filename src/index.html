@@ -157,8 +157,48 @@
           <input id="search-box" type="search" placeholder="Search company or position&hellip;" />
           <button id="export-csv-btn" class="btn btn-secondary btn-small">Export CSV</button>
         </div>
+        <!-- Summary panel: hero metric, then labelled sections of dense
+             chip/label/value rows, after the Stats popup layout. -->
+        <section class="panel" id="summary-panel">
+          <button type="button" id="summary-toggle" class="panel-header" aria-expanded="true" aria-controls="summary-body">
+            <span>Overview</span>
+            <span class="panel-chevron" aria-hidden="true"></span>
+          </button>
+          <div id="summary-body" class="panel-body">
+          <div class="panel-hero">
+            <div class="hero-ring">
+              <svg id="summary-donut" viewBox="0 0 84 84" aria-hidden="true">
+                <circle class="donut-track" cx="42" cy="42" r="34" />
+                <g id="summary-donut-arcs"></g>
+              </svg>
+              <div class="hero-ring-label">
+                <strong id="summary-total">0</strong>
+                <span>total</span>
+              </div>
+            </div>
+            <dl class="hero-figures">
+              <div>
+                <dt>Response rate</dt>
+                <dd id="summary-response-rate">0%</dd>
+              </div>
+              <div>
+                <dt>Heard back</dt>
+                <dd id="summary-responded">0</dd>
+              </div>
+              <div>
+                <dt>Still waiting</dt>
+                <dd id="summary-waiting">0</dd>
+              </div>
+            </dl>
+          </div>
+
+          <p class="section-label">Breakdown</p>
+          <div id="summary-rows" class="detail-rows"></div>
+          </div>
+        </section>
+
         <div id="list-status" class="list-status">Loading&hellip;</div>
-        <div id="list-stats" class="list-stats"></div>
+        <div id="list-stats" class="list-stats" hidden></div>
         <p class="hint">Click a row to edit it, a heading to sort by it, or &times; to delete it.</p>
         <div class="table-scroll">
           <table id="applications-table">
@@ -197,7 +237,7 @@
           <button id="cal-today" class="btn btn-link btn-small">Today</button>
         </div>
 
-        <div id="cal-stats" class="cal-stats"></div>
+        <dl id="cal-stats" class="cal-stats hero-figures"></dl>
 
         <div id="cal-grid" class="cal-grid" role="grid" aria-labelledby="cal-month-label">
           <div class="cal-weekdays" id="cal-weekdays" role="row"></div>
@@ -297,6 +337,7 @@
     <button id="retry-dismiss" class="btn btn-link btn-small">Dismiss</button>
   </div>
 
+  <script src="stats.js"></script>
   <script src="calendar.js"></script>
   <script src="app.js"></script>
 </body>
