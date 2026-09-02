@@ -1060,29 +1060,16 @@ button.detail-row.active {
   transform: scale(1.05);
 }
 
+/* Today is marked by weight alone. It used to carry a ring too, which was
+   the same ring the selected day gets - two identical highlights on screen
+   at once, with nothing to say which was which. The ring now means one
+   thing only: this is the day you picked. */
 .cal-day.today {
-  box-shadow: inset 0 0 0 2px var(--accent);
   font-weight: 650;
-}
-
-/* On a heavily shaded day the accent ring is the same colour as the fill,
-   so today switches to a light ring there. */
-.cal-day.today.level-3,
-.cal-day.today.level-4 {
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9);
 }
 
 .cal-day.selected {
   box-shadow: 0 0 0 2px var(--accent);
-}
-
-.cal-day.today.selected {
-  box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px var(--accent);
-}
-
-.cal-day.today.selected.level-3,
-.cal-day.today.selected.level-4 {
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 0 2px var(--accent);
 }
 
 .cal-legend {
