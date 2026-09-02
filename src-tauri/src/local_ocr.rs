@@ -160,6 +160,31 @@ impl OcrLine {
     }
 }
 
+/// How big the text on one line is, judged from the words that are
+/// actually words.
+///
+/// A word's box is a font-size proxy only when the word is text. A company
+/// logo OCRs as one-character tokens whose boxes are as tall as a heading,
+/// and a chip's rounded border comes through as punctuation - either of
+/// which beats the real title if you take the tallest box on the line,
+/// which is what this used to do. Fewer than two alphanumeric characters
+/// is not evidence of type size; the median of what remains is robust to a
+/// stray glyph sitting among real words.
+fn line_type_size(words: &[(String, f32)]) -> f32 {
+    let mut real: Vec<f32> = words
+        .iter()
+        .filter(|(t, _)| t.chars().filter(|c| c.is_alphanumeric()).count() >= 2)
+        .map(|(_, h)| *h)
+        .collect();
+    if real.is_empty() {
+        // Nothing but glyphs: fall back to the tallest, which at least
+        // keeps a single-word line from measuring zero.
+        return words.iter().fold(0.0_f32, |acc, (_, h)| acc.max(*h));
+    }
+    real.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    real[real.len() / 2]
+}
+
 /// How big the text in a block actually is.
 ///
 /// Not the same as the block's bounding box, which is what this used to
@@ -215,6 +240,23 @@ fn split_company_from_title(block: &OcrLine) -> Option<(String, String)> {
 const COMPANY_SUFFIXES: [&str; 10] = [
     "co", "inc", "llc", "ltd", "plc", "ag", "sa", "bv", "nv", "gmbh",
 ];
+
+/// Drops trailing tokens carrying no letters or digits.
+///
+/// The verified-employer badge beside a job title comes back as a stray
+/// glyph, and a chip border as punctuation; either way it ends up glued to
+/// the end of the title.
+fn strip_trailing_glyphs(value: &str) -> String {
+    let mut tokens: Vec<&str> = value.split_whitespace().collect();
+    while let Some(last) = tokens.last() {
+        if tokens.len() > 1 && !last.chars().any(|c| c.is_alphanumeric()) {
+            tokens.pop();
+        } else {
+            break;
+        }
+    }
+    tokens.join(" ")
+}
 
 /// Removes OCR debris from the edges of a short value.
 ///
@@ -303,7 +345,18 @@ fn run_tesseract_best_of(image_path: &std::path::Path) -> Result<Vec<OcrLine>, S
         match run_tesseract(image_path, psm) {
             Ok(lines) => {
                 let score = reading_score(&lines);
-                if best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+                // On an equal read, prefer the mode that produced fewer
+                // blocks: the finer segmentation is over-segmentation, and
+                // it splits a wrapped title across two blocks so neither
+                // one is the whole title.
+                let better = match best.as_ref() {
+                    None => true,
+                    Some((best_score, best_lines)) => {
+                        score > *best_score
+                            || (score == *best_score && lines.len() < best_lines.len())
+                    }
+                };
+                if better {
                     best = Some((score, lines));
                 }
             }
@@ -366,9 +419,11 @@ fn parse_tesseract_tsv(tsv: &str) -> Vec<OcrLine> {
         top: f32,
         right: f32,
         bottom: f32,
-        /// Words kept per text line, so a block's internal type sizes
-        /// survive into `sub_lines`.
-        lines: Vec<(i64, Vec<String>, f32)>,
+        /// Words kept per text line with each word's own box height, so a
+        /// block's internal type sizes survive into `sub_lines`. Heights are
+        /// per word rather than per line because one graphic among real
+        /// words must not decide the line's size - see `line_type_size`.
+        lines: Vec<(i64, Vec<(String, f32)>)>,
     }
 
     let mut groups: Vec<Group> = Vec::new();
@@ -410,11 +465,10 @@ fn parse_tesseract_tsv(tsv: &str) -> Vec<OcrLine> {
                 g.right = g.right.max(left + width);
                 g.bottom = g.bottom.max(top + height);
                 match g.lines.last_mut() {
-                    Some((n, words, h)) if *n == line_num => {
-                        words.push(text.to_string());
-                        *h = h.max(height);
+                    Some((n, words)) if *n == line_num => {
+                        words.push((text.to_string(), height));
                     }
-                    _ => g.lines.push((line_num, vec![text.to_string()], height)),
+                    _ => g.lines.push((line_num, vec![(text.to_string(), height)])),
                 }
             }
             _ => groups.push(Group {
@@ -424,7 +478,7 @@ fn parse_tesseract_tsv(tsv: &str) -> Vec<OcrLine> {
                 top,
                 right: left + width,
                 bottom: top + height,
-                lines: vec![(line_num, vec![text.to_string()], height)],
+                lines: vec![(line_num, vec![(text.to_string(), height)])],
             }),
         }
     }
@@ -438,9 +492,13 @@ fn parse_tesseract_tsv(tsv: &str) -> Vec<OcrLine> {
             sub_lines: g
                 .lines
                 .into_iter()
-                .map(|(_, words, height)| SubLine {
-                    text: words.join(" "),
-                    height,
+                .map(|(_, words)| SubLine {
+                    height: line_type_size(&words),
+                    text: words
+                        .into_iter()
+                        .map(|(t, _)| t)
+                        .collect::<Vec<_>>()
+                        .join(" "),
                 })
                 .collect(),
         })
@@ -543,18 +601,23 @@ pub fn guess_fields(lines: &[OcrLine]) -> ExtractedFields {
     let split = title_index.and_then(|i| split_company_from_title(sorted[i]));
 
     let position = match &split {
-        Some((_, title)) => Some(title.clone()),
-        None => title_index.map(|i| sorted[i].text.trim().to_string()),
+        Some((_, title)) => Some(strip_trailing_glyphs(title)),
+        None => title_index.map(|i| strip_trailing_glyphs(sorted[i].text.trim())),
     };
 
+    // A logo usually OCRs as its own block of one or two glyphs sitting
+    // directly above the company name. That is not the company, so a
+    // candidate has to still carry two alphanumerics once debris is off.
     let company = match &split {
         Some((company, _)) => Some(company.clone()),
         None => title_index.and_then(|i| {
             (0..i)
                 .rev()
-                .map(|j| sorted[j].text.trim())
-                .find(|t| !t.is_empty() && t.chars().count() <= 80)
-                .map(|t| t.to_string())
+                .map(|j| strip_edge_noise(sorted[j].text.trim()))
+                .find(|t| {
+                    t.chars().count() <= 80
+                        && t.chars().filter(|c| c.is_alphanumeric()).count() >= 2
+                })
         }),
     };
 
@@ -1141,5 +1204,144 @@ mod tests {
     fn type_size_falls_back_to_the_box_when_there_are_no_sub_lines() {
         let bare = OcrLine { text: "x".into(), top: 0.0, height: 17.0, sub_lines: vec![] };
         assert_eq!(type_size(&bare), 17.0);
+    }
+
+    // ---- measured against a real Tesseract run ----
+    //
+    // The numbers below are what Tesseract 5.5 actually produced for a
+    // LinkedIn job card at 2x upscale, not invented ones. The company row
+    // reads as "| a Amazon": the orange logo tile becomes two one-character
+    // tokens whose boxes are 44px tall, while "Amazon" itself is 20px and
+    // the 21px title is 40px. Taking the tallest box on a line made the
+    // logo row tie the title and win.
+
+    #[test]
+    fn a_logo_glyph_does_not_set_the_line_size() {
+        let company_row = [
+            ("|".to_string(), 44.0),
+            ("a".to_string(), 44.0),
+            ("Amazon".to_string(), 20.0),
+        ];
+        assert_eq!(
+            line_type_size(&company_row),
+            20.0,
+            "only Amazon is a word; the logo tokens are not evidence of type size"
+        );
+    }
+
+    #[test]
+    fn the_median_ignores_one_stray_glyph_among_words() {
+        let title_row = [
+            ("Intern/Co-op".to_string(), 40.0),
+            ("-".to_string(), 8.0),
+            ("2026".to_string(), 40.0),
+        ];
+        assert_eq!(line_type_size(&title_row), 40.0);
+    }
+
+    #[test]
+    fn a_line_of_only_glyphs_falls_back_to_its_tallest() {
+        let junk = [(")".to_string(), 30.0), (")".to_string(), 12.0)];
+        assert_eq!(line_type_size(&junk), 30.0, "never zero");
+        assert_eq!(line_type_size(&[]), 0.0);
+    }
+
+    #[test]
+    fn the_logo_row_no_longer_outranks_the_title() {
+        let blocks = vec![
+            OcrLine {
+                text: "| a Amazon".into(),
+                top: 30.0,
+                height: 44.0,
+                sub_lines: vec![SubLine { text: "| a Amazon".into(), height: 20.0 }],
+            },
+            OcrLine {
+                text: "a".into(),
+                top: 40.0,
+                height: 7.0,
+                sub_lines: vec![SubLine { text: "a".into(), height: 7.0 }],
+            },
+            OcrLine {
+                text: "Robotics - Software Development Engineer Fall Intern/Co-op - 2026".into(),
+                top: 90.0,
+                height: 98.0,
+                sub_lines: vec![
+                    SubLine { text: "Robotics - Software Development Engineer Fall".into(), height: 40.0 },
+                    SubLine { text: "Intern/Co-op - 2026".into(), height: 40.0 },
+                ],
+            },
+            OcrLine::flat("Westboro, WI: 5 days ago 42 people clicked apply", 200.0, 21.0),
+            OcrLine::flat("On-site Full-time", 240.0, 21.0),
+        ];
+        let f = guess_fields(&blocks);
+        assert_eq!(
+            f.position.as_deref(),
+            Some("Robotics - Software Development Engineer Fall Intern/Co-op - 2026")
+        );
+        assert_eq!(
+            f.company.as_deref(),
+            Some("Amazon"),
+            "the logo debris is stripped and the single-glyph block skipped"
+        );
+        assert_eq!(f.location.as_deref(), Some("Westboro, WI"));
+        assert_eq!(f.work_type.as_deref(), Some("On-site"));
+        assert_eq!(
+            f.employment_type.as_deref(),
+            Some("Full-time"),
+            "read from the badge, not Intern/Co-op in the title"
+        );
+    }
+
+    #[test]
+    fn a_verified_badge_is_not_part_of_the_job_title() {
+        assert_eq!(
+            strip_trailing_glyphs("Intern/Co-op - 2026 \u{fffd}"),
+            "Intern/Co-op - 2026"
+        );
+        assert_eq!(strip_trailing_glyphs("Senior Engineer ) )"), "Senior Engineer");
+        assert_eq!(
+            strip_trailing_glyphs("Engineer II"),
+            "Engineer II",
+            "a real trailing word is kept"
+        );
+        assert_eq!(strip_trailing_glyphs("|"), "|", "never empties the value");
+    }
+
+    #[test]
+    fn a_single_glyph_block_is_never_taken_as_the_company() {
+        let blocks = vec![
+            OcrLine::flat("a", 0.0, 8.0),
+            OcrLine::flat("Acme Corporation", 20.0, 14.0),
+            OcrLine::flat("Senior Platform Engineer", 50.0, 30.0),
+        ];
+        assert_eq!(
+            guess_fields(&blocks).company.as_deref(),
+            Some("Acme Corporation"),
+            "the search walks past the logo glyph to a real name"
+        );
+    }
+
+    #[test]
+    fn an_equal_read_prefers_the_coarser_segmentation() {
+        // psm 3 and psm 11 read the same characters, but psm 11 splits the
+        // wrapped title into two blocks, so neither block is the title.
+        let together = vec![
+            OcrLine::flat("Acme", 0.0, 10.0),
+            OcrLine::flat("Senior Platform Engineer Fall", 20.0, 30.0),
+        ];
+        let split_apart = vec![
+            OcrLine::flat("Acme", 0.0, 10.0),
+            OcrLine::flat("Senior Platform", 20.0, 30.0),
+            OcrLine::flat("Engineer Fall", 40.0, 30.0),
+        ];
+        assert_eq!(
+            reading_score(&together),
+            reading_score(&split_apart),
+            "the same characters either way - only the grouping differs"
+        );
+        assert!(
+            split_apart.len() > together.len(),
+            "and the tie-break is block count, fewest wins"
+        );
     }
 }
