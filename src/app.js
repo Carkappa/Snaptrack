@@ -1460,6 +1460,7 @@ ${e}`;
       return `<div class="key-stored">
         <span class="key-badge">Added</span>
         <span class="hint">Held in your OS keychain, never written to a file.</span>
+        <button type="button" class="btn btn-link btn-small" data-act="test">Test</button>
         <button type="button" class="btn btn-link btn-small" data-act="replace">Replace</button>
         <button type="button" class="btn btn-link btn-small" data-act="remove">Remove</button>
       </div>
@@ -1515,6 +1516,18 @@ ${e}`;
         await renderProviderCards();
       } catch (err) {
         cardMessage(card, String(err));
+      }
+      return;
+    }
+    if (act === "test") {
+      btn.disabled = true;
+      cardMessage(card, "Checking…");
+      try {
+        cardMessage(card, await invoke("test_api_key", { provider: id }));
+      } catch (err) {
+        cardMessage(card, String(err));
+      } finally {
+        btn.disabled = false;
       }
       return;
     }

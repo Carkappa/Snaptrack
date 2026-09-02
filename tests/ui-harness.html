@@ -323,6 +323,10 @@
         state.ollamaUnload = enabled;
         return null;
       },
+      test_api_key: ({ provider }) => {
+        if (!state.apiKeys[provider]) throw new Error(`No key stored for ${provider} yet.`);
+        return `Key works. 6 models available, including: protected.gpt-4o.`;
+      },
       workbook_exists: () => state.workbookExists,
       set_ollama_host: ({ host }) => {
         state.ollamaHost = host.trim() || "http://localhost:11434";

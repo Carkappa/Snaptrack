@@ -114,6 +114,25 @@ fn uses_completion_tokens(model: &str) -> bool {
         .any(|family| m.contains(family))
 }
 
+/// How much of the OpenAI API to use for a given attempt.
+///
+/// A gateway in front of the real thing typically forwards `model`,
+/// `messages` and `stream` and rejects the rest - Texas A&M's own client
+/// library sends exactly those three and nothing else. Rather than guess
+/// which extras a given endpoint tolerates, the request steps down this
+/// ladder until one is accepted.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Dialect {
+    /// A guaranteed shape, which only the real OpenAI API supports.
+    StrictSchema,
+    /// Ask for JSON without a schema. Widely supported.
+    JsonObject,
+    /// Nothing but the three fields every gateway forwards. The prompt
+    /// still asks for JSON, and a reply that isn't gets reported as
+    /// unparsed rather than lost.
+    Minimal,
+}
+
 /// `strict` is false when the request is a retry.
 ///
 /// A gateway that only forwards the common parts of the API rejects a
@@ -124,25 +143,11 @@ fn openai_body(
     model: &str,
     image_base64: &str,
     media_type: &str,
-    strict_schema: bool,
+    dialect: Dialect,
 ) -> serde_json::Value {
-    let token_limit = if uses_completion_tokens(model) {
-        serde_json::json!({ "max_completion_tokens": 1024 })
-    } else {
-        serde_json::json!({ "max_tokens": 1024 })
-    };
-    let format = if strict_schema {
-        serde_json::json!({
-            "type": "json_schema",
-            "json_schema": { "name": TOOL_NAME, "strict": true, "schema": field_schema() }
-        })
-    } else {
-        serde_json::json!({ "type": "json_object" })
-    };
-
     let mut body = serde_json::json!({
         "model": model,
-        "response_format": format,
+        "stream": false,
         "messages": [
             { "role": "system", "content": SYSTEM_PROMPT },
             { "role": "user", "content": [
@@ -152,9 +157,33 @@ fn openai_body(
             ]}
         ]
     });
-    if let (Some(obj), Some(limit)) = (body.as_object_mut(), token_limit.as_object()) {
-        obj.extend(limit.clone());
+
+    let Some(obj) = body.as_object_mut() else {
+        return body;
+    };
+    if dialect == Dialect::Minimal {
+        return body;
     }
+
+    // Reasoning models renamed this, and a gateway in front of them
+    // inherits the rename, prefix and all.
+    let limit_key = if uses_completion_tokens(model) {
+        "max_completion_tokens"
+    } else {
+        "max_tokens"
+    };
+    obj.insert(limit_key.to_string(), serde_json::json!(1024));
+    obj.insert(
+        "response_format".to_string(),
+        if dialect == Dialect::StrictSchema {
+            serde_json::json!({
+                "type": "json_schema",
+                "json_schema": { "name": TOOL_NAME, "strict": true, "schema": field_schema() }
+            })
+        } else {
+            serde_json::json!({ "type": "json_object" })
+        },
+    );
     body
 }
 
@@ -520,12 +549,13 @@ async fn openai_compatible(
     name: &str,
 ) -> Result<ExtractionResult, String> {
     let url = format!("{}/chat/completions", api_base.trim_end_matches('/'));
+    let mut last_error = String::new();
 
-    for strict in [true, false] {
+    for dialect in [Dialect::StrictSchema, Dialect::JsonObject, Dialect::Minimal] {
         let request = client
             .post(&url)
             .header("authorization", format!("Bearer {api_key}"))
-            .json(&openai_body(model, image_base64, media_type, strict));
+            .json(&openai_body(model, image_base64, media_type, dialect));
         let (status, body_text) = send_with_retry(request, name).await?;
 
         if status.is_success() {
@@ -543,20 +573,17 @@ async fn openai_compatible(
             };
         }
 
-        let message = error_message(&body_text);
-        // Only a rejected request is worth retrying plainer. A bad key or a
-        // busy service will say the same thing twice.
-        let worth_retrying = strict
-            && status.as_u16() == 400
-            && ["response_format", "json_schema", "schema", "unsupported", "unrecognized"]
-                .iter()
-                .any(|hint| message.to_lowercase().contains(hint));
-        if !worth_retrying {
-            return Err(describe_api_error(name, status, &body_text));
+        last_error = describe_api_error(name, status, &body_text);
+
+        // Only a rejected request is worth asking again more simply. A bad
+        // key, a missing model or a busy service says the same thing to
+        // every dialect, and trying three times would just be slower.
+        if status.as_u16() != 400 || dialect == Dialect::Minimal {
+            return Err(last_error);
         }
     }
 
-    unreachable!("the loop returns on both passes")
+    Err(last_error)
 }
 
 /// Sends the screenshot to the chosen provider and parses the JSON it
@@ -679,7 +706,7 @@ mod tests {
 
     #[test]
     fn openai_sends_the_image_as_a_data_url() {
-        let b = openai_body("test-model", "BASE64DATA", "image/jpeg", true);
+        let b = openai_body("test-model", "BASE64DATA", "image/jpeg", Dialect::StrictSchema);
         assert_eq!(b["model"], "test-model");
         assert_eq!(b["messages"][0]["role"], "system");
         assert_eq!(b["messages"][0]["content"], SYSTEM_PROMPT);
@@ -705,7 +732,7 @@ mod tests {
     fn every_provider_carries_the_same_system_prompt_and_image() {
         for body in [
             claude_body("m", "D", "image/png"),
-            openai_body("m", "D", "image/png", true),
+            openai_body("m", "D", "image/png", Dialect::StrictSchema),
             gemini_body("m", "D", "image/png"),
         ] {
             let text = body.to_string();
@@ -853,7 +880,7 @@ mod tests {
 
     #[test]
     fn openai_is_given_a_strict_json_schema() {
-        let b = openai_body("m", "D", "image/png", true);
+        let b = openai_body("m", "D", "image/png", Dialect::StrictSchema);
         assert_eq!(b["response_format"]["type"], "json_schema");
         assert_eq!(b["response_format"]["json_schema"]["strict"], true);
         assert!(b["response_format"]["json_schema"]["schema"]["properties"]["position"].is_object());
@@ -953,12 +980,12 @@ mod tests {
         // o-series and GPT-5 rejected max_tokens; a gateway in front of
         // them inherits that, prefix and all.
         for model in ["protected.o3", "o3-mini", "protected.gpt-5", "gpt-5"] {
-            let b = openai_body(model, "D", "image/png", true);
+            let b = openai_body(model, "D", "image/png", Dialect::StrictSchema);
             assert!(b.get("max_completion_tokens").is_some(), "{model}");
             assert!(b.get("max_tokens").is_none(), "{model}");
         }
         for model in ["gpt-4o", "protected.gpt-4o", "gpt-4.1"] {
-            let b = openai_body(model, "D", "image/png", true);
+            let b = openai_body(model, "D", "image/png", Dialect::StrictSchema);
             assert!(b.get("max_tokens").is_some(), "{model}");
             assert!(b.get("max_completion_tokens").is_none(), "{model}");
         }
@@ -966,11 +993,11 @@ mod tests {
 
     #[test]
     fn a_plainer_retry_asks_for_json_without_a_schema() {
-        let strict = openai_body("gpt-4o", "D", "image/png", true);
+        let strict = openai_body("gpt-4o", "D", "image/png", Dialect::StrictSchema);
         assert_eq!(strict["response_format"]["type"], "json_schema");
         assert_eq!(strict["response_format"]["json_schema"]["strict"], true);
 
-        let plain = openai_body("gpt-4o", "D", "image/png", false);
+        let plain = openai_body("gpt-4o", "D", "image/png", Dialect::JsonObject);
         assert_eq!(
             plain["response_format"]["type"], "json_object",
             "a gateway that refuses a schema still understands JSON mode"
@@ -1028,5 +1055,39 @@ mod tests {
         assert!(model.starts_with("gemini-"), "got {model}");
         assert_ne!(model, "gemini-2.0-flash", "that one is retired");
         assert_ne!(model, "gemini-1.5-flash", "so is that one");
+    }
+
+    #[test]
+    fn the_minimal_dialect_sends_only_what_every_gateway_forwards() {
+        // Texas A&M's own client library sends exactly model, messages and
+        // stream. A gateway that forwards those and rejects the rest is why
+        // this dialect exists.
+        let b = openai_body("protected.gpt-4o", "D", "image/png", Dialect::Minimal);
+        let obj = b.as_object().unwrap();
+        let mut keys: Vec<&String> = obj.keys().collect();
+        keys.sort();
+        assert_eq!(keys, vec!["messages", "model", "stream"], "nothing else may be sent");
+        assert_eq!(b["stream"], false);
+        // The image and instructions still go, they are inside messages.
+        assert_eq!(b["messages"][0]["content"], SYSTEM_PROMPT);
+        assert_eq!(b["messages"][1]["content"][1]["type"], "image_url");
+    }
+
+    #[test]
+    fn the_ladder_gives_up_one_thing_at_a_time() {
+        let strict = openai_body("gpt-4o", "D", "image/png", Dialect::StrictSchema);
+        let plain = openai_body("gpt-4o", "D", "image/png", Dialect::JsonObject);
+        let minimal = openai_body("gpt-4o", "D", "image/png", Dialect::Minimal);
+
+        assert_eq!(strict["response_format"]["type"], "json_schema");
+        assert_eq!(plain["response_format"]["type"], "json_object");
+        assert!(minimal.get("response_format").is_none());
+
+        assert!(strict.get("max_tokens").is_some());
+        assert!(plain.get("max_tokens").is_some());
+        assert!(
+            minimal.get("max_tokens").is_none(),
+            "the token limit goes with the last step, since a gateway that              refuses response_format often refuses this too"
+        );
     }
 }

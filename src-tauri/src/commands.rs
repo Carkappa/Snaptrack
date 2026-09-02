@@ -568,6 +568,68 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
     })
 }
 
+/// Checks a stored key against the provider, without a screenshot.
+///
+/// A failed capture cannot tell you whether the key is wrong, the model is
+/// gone, or the service is busy - all three arrive as one line at the
+/// moment you were trying to do something else. This asks the provider
+/// directly, and for the OpenAI-compatible ones it lists the models the
+/// key can actually reach, which is the answer to "what do I put in the
+/// Model field".
+#[tauri::command]
+pub async fn test_api_key(provider: String) -> Result<String, String> {
+    let p = crate::models::find_provider(&provider)
+        .ok_or_else(|| format!("'{provider}' is not a method this build knows."))?;
+    if !p.needs_key {
+        return Ok(format!("{} needs no key.", p.label));
+    }
+    let key = keychain::get_api_key(&p.id)
+        .map_err(|_| format!("No key stored for {} yet.", p.label))?;
+
+    if p.api_base.is_empty() {
+        // Anthropic and Gemini have no shared listing endpoint; the only
+        // honest check is a real request, which capture already does.
+        return Ok(format!(
+            "A key is stored for {}. It is checked when you next capture.",
+            p.label
+        ));
+    }
+
+    let url = format!("{}/models", p.api_base.trim_end_matches('/'));
+    let response = reqwest::Client::new()
+        .get(&url)
+        .header("authorization", format!("Bearer {key}"))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach {}: {e}", p.label))?;
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("{} rejected the key ({status}).", p.label));
+    }
+
+    let names: Vec<String> = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("data").cloned())
+        .and_then(|d| d.as_array().cloned())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if names.is_empty() {
+        return Ok(format!("Key works - {} accepted it.", p.label));
+    }
+    Ok(format!(
+        "Key works. {} models available, including: {}.",
+        names.len(),
+        names.iter().take(6).cloned().collect::<Vec<_>>().join(", ")
+    ))
+}
+
 /// The OCR blocks travel to the frontend alongside the guessed fields:
 /// they are what the click-to-fill list is built from, and what a later
 /// correction is matched against.
