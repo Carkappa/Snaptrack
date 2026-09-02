@@ -8,7 +8,7 @@
 # `sha256` - get the checksum with:
 #   shasum -a 256 "Job Tracker_<version>_aarch64.dmg"
 cask "job-tracker" do
-  version "0.2.0"
+  version "0.3.0"
   sha256 :no_check
 
   url "https://github.com/Carkappa/Snaptrack/releases/download/v#{version}/Job.Tracker_#{version}_aarch64.dmg",
