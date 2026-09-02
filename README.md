@@ -49,6 +49,10 @@ comes back empty.
 | **Tesseract** (default) | free, offline | Needs [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki) on your `PATH`. Raw text goes to Notes to check against. |
 | **[Ollama](https://ollama.com)** | free, offline | A model on your own machine. Pick from a list with sizes and hardware notes; Settings downloads it for you. **Vision models read the screenshot directly**, skipping Tesseract entirely. The model is unloaded after each capture, so it holds no RAM while you're not using it. |
 | **Claude, ChatGPT, Gemini** | API key | Most accurate. Each key stored separately in your OS keychain. |
+| **Texas A&M AI Chat** | free with a NetID | GPT, Claude and Gemini through the university. Key from [chat.tamu.ai](https://chat.tamu.ai). |
+
+Set a running order under **If that doesn't work** and the next choice takes
+over when one fails — an expired key, a rate limit, no network.
 
 Or use none of them and type entries by hand.
 

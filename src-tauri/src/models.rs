@@ -33,6 +33,9 @@ pub struct ExtractionProvider {
     /// Heading the method is listed under, so the choice reads as "which
     /// kind of thing" first and "which one" second.
     pub group: String,
+    /// Base URL for providers that speak OpenAI's wire format. Empty for
+    /// everything else, which has its own endpoint.
+    pub api_base: String,
 }
 
 impl ExtractionProvider {
@@ -45,6 +48,7 @@ impl ExtractionProvider {
         key_help: &str,
         default_model: &str,
         group: &str,
+        api_base: &str,
     ) -> Self {
         Self {
             id: id.to_string(),
@@ -55,6 +59,7 @@ impl ExtractionProvider {
             key_help: key_help.to_string(),
             default_model: default_model.to_string(),
             group: group.to_string(),
+            api_base: api_base.to_string(),
         }
     }
 }
@@ -63,6 +68,7 @@ pub const DEFAULT_PROVIDER: &str = "tesseract";
 
 const ON_MACHINE: &str = "On this machine - free, nothing leaves it";
 const CLOUD: &str = "Cloud - needs an API key";
+const UNIVERSITY: &str = "Texas A&M - free with your NetID";
 
 /// Models known to be small, fast on a CPU, and good at returning JSON,
 /// best first. Used only to choose among what the user already has pulled.
@@ -317,6 +323,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "",
             "",
             ON_MACHINE,
+            "",
         ),
         ExtractionProvider::new(
             "ollama",
@@ -327,6 +334,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "",
             "qwen2.5:3b",
             ON_MACHINE,
+            "",
         ),
         ExtractionProvider::new(
             "claude",
@@ -337,6 +345,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "Create one at console.anthropic.com under API Keys.",
             "claude-sonnet-5",
             CLOUD,
+            "",
         ),
         ExtractionProvider::new(
             "openai",
@@ -347,6 +356,18 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "Create one at platform.openai.com/api-keys.",
             "gpt-4o",
             CLOUD,
+            "https://api.openai.com/v1",
+        ),
+        ExtractionProvider::new(
+            "tamu",
+            "Texas A&M AI Chat",
+            true,
+            "TAMU AI Chat API key",
+            "sk-...",
+            "Sign in at chat.tamu.ai with your NetID, then create a key in Settings there.",
+            "protected.gpt-4o",
+            UNIVERSITY,
+            "https://chat-api.tamu.ai/openai",
         ),
         ExtractionProvider::new(
             "gemini",
@@ -357,6 +378,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "Create one at aistudio.google.com/apikey.",
             "gemini-2.0-flash",
             CLOUD,
+            "",
         ),
     ]
 }
@@ -436,9 +458,29 @@ mod provider_tests {
         assert!(groups.iter().all(|g| !g.is_empty()), "an ungrouped method has nowhere to appear");
         groups.sort();
         groups.dedup();
-        assert_eq!(groups.len(), 2, "offline versus cloud is the distinction that matters");
+        assert_eq!(
+            groups.len(),
+            3,
+            "on this machine, paid cloud, and the university account are three different decisions"
+        );
         assert_eq!(find_provider("ollama").unwrap().group, ON_MACHINE);
         assert_eq!(find_provider("claude").unwrap().group, CLOUD);
+    }
+
+    #[test]
+    fn tamu_speaks_openais_wire_format_at_its_own_address() {
+        let p = find_provider("tamu").expect("the university option must exist");
+        assert_eq!(p.api_base, "https://chat-api.tamu.ai/openai");
+        assert!(p.needs_key, "it still needs a key, just a free one");
+        assert!(
+            p.default_model.starts_with("protected."),
+            "TAMU namespaces its models, and a bare model name is rejected"
+        );
+        assert_eq!(
+            find_provider("openai").unwrap().api_base,
+            "https://api.openai.com/v1",
+            "the two share a wire format and differ only by address"
+        );
     }
 
     #[test]

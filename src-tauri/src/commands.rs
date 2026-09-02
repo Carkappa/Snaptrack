@@ -16,6 +16,7 @@ const STATUS_DEFS_KEY: &str = "status_defs";
 const MODELS_KEY: &str = "provider_models";
 const OCR_HINTS_KEY: &str = "ocr_field_hints";
 const OLLAMA_HOST_KEY: &str = "ollama_host";
+const FALLBACK_CHAIN_KEY: &str = "extraction_fallbacks";
 const OLLAMA_UNLOAD_KEY: &str = "ollama_unload_after_use";
 const DEFAULT_OLLAMA_HOST: &str = "http://localhost:11434";
 const UPDATE_CHECK_ENABLED_KEY: &str = "update_check_enabled";
@@ -197,6 +198,7 @@ pub async fn extract_from_image<R: tauri::Runtime>(
         &api_key,
         &image_base64,
         &media_type,
+        &provider.api_base,
     )
     .await
 }
@@ -1507,4 +1509,136 @@ pub fn open_screenshot<R: tauri::Runtime>(
     app.opener()
         .open_path(path.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| format!("Couldn't open the screenshot: {e}"))
+}
+
+/// Methods to try, in order, when the chosen one fails.
+///
+/// Extraction fails for reasons that have nothing to do with the
+/// screenshot: an expired key, a rate limit, a model retired by its
+/// provider, no network. A second choice turns any of those from "type it
+/// in by hand" into a pause.
+#[tauri::command]
+pub fn get_fallback_chain<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<String> {
+    read_fallback_chain(&app)
+}
+
+fn read_fallback_chain<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(FALLBACK_CHAIN_KEY))
+        .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn set_fallback_chain<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    chain: Vec<String>,
+) -> Result<Vec<String>, String> {
+    // Only methods this build knows, each at most once, and never the
+    // primary - trying the thing that just failed again is not a fallback.
+    let primary = get_extraction_method(app.clone())?;
+    let mut seen = std::collections::HashSet::new();
+    let cleaned: Vec<String> = chain
+        .into_iter()
+        .filter(|id| crate::models::find_provider(id).is_some())
+        .filter(|id| id != &primary)
+        .filter(|id| seen.insert(id.clone()))
+        .collect();
+
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    store.set(
+        FALLBACK_CHAIN_KEY,
+        serde_json::to_value(&cleaned).map_err(|e| e.to_string())?,
+    );
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))?;
+    Ok(cleaned)
+}
+
+/// The result of an extraction, plus which method actually produced it.
+#[derive(serde::Serialize)]
+pub struct ChainResult {
+    #[serde(flatten)]
+    pub outcome: LocalOcrResult,
+    /// The provider that succeeded, so the UI can say what read the page.
+    pub used: String,
+    /// What was tried and failed first, for when the answer looks odd.
+    pub fell_back_from: Vec<String>,
+}
+
+/// Runs one method, whichever kind it is.
+async fn run_one<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    provider: &str,
+    image_base64: &str,
+    media_type: &str,
+) -> Result<LocalOcrResult, String> {
+    match provider {
+        "tesseract" => extract_with_local_ocr(app.clone(), image_base64.to_string()),
+        "ollama" => extract_with_ollama(app.clone(), image_base64.to_string()).await,
+        _ => {
+            let result = extract_from_image(
+                app.clone(),
+                image_base64.to_string(),
+                media_type.to_string(),
+            )
+            .await?;
+            // A cloud model reads the image itself, so there are no OCR
+            // blocks to offer for click-to-fill.
+            Ok(LocalOcrResult {
+                result,
+                blocks: Vec::new(),
+                site: None,
+            })
+        }
+    }
+}
+
+/// Tries the chosen method, then each fallback in turn, and returns the
+/// first that works.
+///
+/// A result the user has to correct still counts as working - only an
+/// outright failure moves on, since a provider that answered has done its
+/// job and the next one is unlikely to do better on the same image.
+#[tauri::command]
+pub async fn extract_with_chain<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    image_base64: String,
+    media_type: String,
+) -> Result<ChainResult, String> {
+    let primary = get_extraction_method(app.clone())?;
+    let mut chain = vec![primary];
+    chain.extend(read_fallback_chain(&app));
+
+    let mut failed = Vec::new();
+    let mut last_error = String::new();
+
+    for provider in &chain {
+        match run_one(&app, provider, &image_base64, &media_type).await {
+            Ok(outcome) => {
+                return Ok(ChainResult {
+                    outcome,
+                    used: provider.clone(),
+                    fell_back_from: failed,
+                })
+            }
+            Err(e) => {
+                last_error = format!("{provider}: {e}");
+                failed.push(provider.clone());
+            }
+        }
+    }
+
+    Err(if failed.len() > 1 {
+        format!(
+            "Every method failed. The last was {last_error}. Tried: {}.",
+            failed.join(", ")
+        )
+    } else {
+        last_error
+    })
 }

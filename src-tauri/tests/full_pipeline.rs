@@ -773,3 +773,54 @@ fn switching_without_moving_leaves_both_files_alone() {
     assert!(from.is_file(), "someone who did not ask for a move keeps their file");
     assert!(!to.exists(), "and the new path starts empty");
 }
+
+/// The fallback chain is what turns an expired key or a rate limit into a
+/// pause rather than "type it in by hand".
+#[test]
+fn the_fallback_chain_is_cleaned_before_it_is_stored() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    commands::set_extraction_method(handle.clone(), "gemini".into()).unwrap();
+
+    let stored = commands::set_fallback_chain(
+        handle.clone(),
+        vec![
+            "openai".into(),
+            "gemini".into(),          // the primary - trying it again is not a fallback
+            "openai".into(),          // a duplicate
+            "not-a-real-provider".into(),
+            "tesseract".into(),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(
+        stored,
+        vec!["openai".to_string(), "tesseract".to_string()],
+        "order is kept, and the primary, duplicates and unknowns are dropped"
+    );
+    assert_eq!(commands::get_fallback_chain(handle), stored);
+}
+
+#[test]
+fn a_chain_starts_empty_and_survives_a_round_trip() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    assert!(
+        commands::get_fallback_chain(handle.clone()).is_empty(),
+        "nobody gets a second provider they did not ask for"
+    );
+
+    commands::set_extraction_method(handle.clone(), "tesseract".into()).unwrap();
+    commands::set_fallback_chain(handle.clone(), vec!["ollama".into(), "claude".into()]).unwrap();
+    assert_eq!(
+        commands::get_fallback_chain(handle.clone()),
+        vec!["ollama".to_string(), "claude".to_string()]
+    );
+
+    // Emptying it puts things back to a single method.
+    commands::set_fallback_chain(handle.clone(), vec![]).unwrap();
+    assert!(commands::get_fallback_chain(handle).is_empty());
+}

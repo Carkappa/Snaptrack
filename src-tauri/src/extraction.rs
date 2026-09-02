@@ -35,7 +35,6 @@ fn strip_code_fences(text: &str) -> String {
     without_fence.trim().to_string()
 }
 
-const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const GEMINI_URL_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 const USER_PROMPT: &str = "Extract the job posting fields from this screenshot as JSON.";
@@ -392,6 +391,7 @@ fn provider_display_name(provider: &str) -> &str {
         "claude" => "Anthropic",
         "openai" => "OpenAI",
         "gemini" => "Gemini",
+        "tamu" => "Texas A&M AI Chat",
         other => other,
     }
 }
@@ -405,6 +405,7 @@ pub async fn extract_fields_from_image(
     api_key: &str,
     image_base64: &str,
     media_type: &str,
+    api_base: &str,
 ) -> Result<ExtractionResult, String> {
     let name = provider_display_name(provider);
     let client = reqwest::Client::new();
@@ -415,8 +416,10 @@ pub async fn extract_fields_from_image(
             .header("x-api-key", api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
             .json(&claude_body(model, image_base64, media_type)),
-        "openai" => client
-            .post(OPENAI_URL)
+        // Texas A&M's AI Chat speaks OpenAI's wire format at its own
+        // address, so the two share everything but the URL.
+        "openai" | "tamu" => client
+            .post(format!("{}/chat/completions", api_base.trim_end_matches('/')))
             .header("authorization", format!("Bearer {api_key}"))
             .json(&openai_body(model, image_base64, media_type)),
         "gemini" => client

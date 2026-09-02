@@ -297,6 +297,20 @@
           <p id="extraction-method-status" class="hint"></p>
         </div>
 
+        <div class="settings-group">
+          <h2>If that doesn't work</h2>
+          <p class="hint">
+            Tried in order when the method above fails - an expired key, a
+            rate limit, or no network. Nothing here is used while the first
+            choice is working.
+          </p>
+          <ul id="fallback-list" class="fallback-list"></ul>
+          <div class="path-row">
+            <select id="fallback-add"></select>
+            <button id="fallback-add-btn" class="btn btn-secondary">Add</button>
+          </div>
+        </div>
+
         <!-- Only rendered for a method that actually needs a key, so an
              offline setup never sees a cloud provider's wording. -->
         <div class="settings-group" id="api-key-group" hidden>

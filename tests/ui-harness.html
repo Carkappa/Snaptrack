@@ -83,6 +83,9 @@
       pathChange: { outcome: "Moved", screenshots: 2, backups: 3 },
       ollamaHost: "http://localhost:11434",
       ollamaUnload: true,
+      fallbackChain: [],
+      // Provider ids listed here fail, to exercise the fallback path.
+      chainFails: [],
       // A trimmed stand-in for models.rs's ollama_catalogue().
       ollamaCatalogue: [
         { id: "qwen2.5:3b", label: "Qwen 2.5 3B", vision: false, size: "~2 GB", accuracy: "Good", hardware: "Runs on a CPU", description: "Reads the text Tesseract found." },
@@ -156,18 +159,19 @@
         return summary;
       },
       get_extraction_providers: () => [
-        { id: "tesseract", label: "Tesseract - free, offline, no key", needs_key: false, key_label: "", key_placeholder: "", key_help: "", default_model: "", group: "On this machine - free, nothing leaves it" },
-        { id: "ollama", label: "Local model (Ollama) - free, offline", needs_key: false, key_label: "", key_placeholder: "", key_help: "", default_model: "qwen2.5:3b", group: "On this machine - free, nothing leaves it" },
-        { id: "claude", label: "Claude (Anthropic)", needs_key: true, key_label: "Anthropic API key", key_placeholder: "sk-ant-...", key_help: "Create one at console.anthropic.com under API Keys.", default_model: "claude-sonnet-5", group: "Cloud - needs an API key" },
-        { id: "openai", label: "ChatGPT (OpenAI)", needs_key: true, key_label: "OpenAI API key", key_placeholder: "sk-...", key_help: "Create one at platform.openai.com/api-keys.", default_model: "gpt-4o", group: "Cloud - needs an API key" },
-        { id: "gemini", label: "Gemini (Google)", needs_key: true, key_label: "Google AI Studio API key", key_placeholder: "AIza...", key_help: "Create one at aistudio.google.com/apikey.", default_model: "gemini-2.0-flash", group: "Cloud - needs an API key" },
+        { id: "tesseract", label: "Tesseract - free, offline, no key", needs_key: false, key_label: "", key_placeholder: "", key_help: "", default_model: "", group: "On this machine - free, nothing leaves it", api_base: "" },
+        { id: "ollama", label: "Local model (Ollama) - free, offline", needs_key: false, key_label: "", key_placeholder: "", key_help: "", default_model: "qwen2.5:3b", group: "On this machine - free, nothing leaves it", api_base: "" },
+        { id: "claude", label: "Claude (Anthropic)", needs_key: true, key_label: "Anthropic API key", key_placeholder: "sk-ant-...", key_help: "Create one at console.anthropic.com under API Keys.", default_model: "claude-sonnet-5", group: "Cloud - needs an API key", api_base: "" },
+        { id: "openai", label: "ChatGPT (OpenAI)", needs_key: true, key_label: "OpenAI API key", key_placeholder: "sk-...", key_help: "Create one at platform.openai.com/api-keys.", default_model: "gpt-4o", group: "Cloud - needs an API key", api_base: "https://api.openai.com/v1" },
+        { id: "tamu", label: "Texas A&M AI Chat", needs_key: true, key_label: "TAMU AI Chat API key", key_placeholder: "sk-...", key_help: "Sign in at chat.tamu.ai with your NetID, then create a key in Settings there.", default_model: "protected.gpt-4o", group: "Texas A&M - free with your NetID", api_base: "https://chat-api.tamu.ai/openai" },
+        { id: "gemini", label: "Gemini (Google)", needs_key: true, key_label: "Google AI Studio API key", key_placeholder: "AIza...", key_help: "Create one at aistudio.google.com/apikey.", default_model: "gemini-2.0-flash", group: "Cloud - needs an API key", api_base: "" },
       ],
       get_model: ({ provider }) => {
-        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash", ollama: "qwen2.5:3b" };
+        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash", ollama: "qwen2.5:3b", tamu: "protected.gpt-4o" };
         return state.models[provider] || d[provider] || "";
       },
       set_model: ({ provider, model }) => {
-        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash", ollama: "qwen2.5:3b" };
+        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash", ollama: "qwen2.5:3b", tamu: "protected.gpt-4o" };
         if (!model.trim()) delete state.models[provider];
         else state.models[provider] = model.trim();
         return state.models[provider] || d[provider] || "";
@@ -293,6 +297,25 @@
         }
         state.ollama.models.push(model);
         return null;
+      },
+      get_fallback_chain: () => state.fallbackChain,
+      set_fallback_chain: ({ chain }) => {
+        // Mirrors set_fallback_chain: known providers, no duplicates,
+        // never the primary.
+        const known = new Set(HANDLERS.get_extraction_providers().map((p) => p.id));
+        const seen = new Set();
+        state.fallbackChain = chain.filter(
+          (id) => known.has(id) && id !== state.extractionMethod && !seen.has(id) && seen.add(id)
+        );
+        return state.fallbackChain;
+      },
+      extract_with_chain: ({ imageBase64, mediaType }) => {
+        if (state.chainFails.includes(state.extractionMethod)) {
+          const used = [...state.fallbackChain].find((p) => !state.chainFails.includes(p));
+          if (!used) throw new Error("Every method failed.");
+          return { ...HANDLERS.extract_with_local_ocr(), used, fell_back_from: [state.extractionMethod] };
+        }
+        return { ...HANDLERS.extract_with_local_ocr(), used: state.extractionMethod, fell_back_from: [] };
       },
       get_ollama_host: () => state.ollamaHost,
       get_ollama_unload: () => state.ollamaUnload,

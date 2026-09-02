@@ -96,6 +96,9 @@
     apiKeyGroup: el("api-key-group"),
     apiKeyHeading: el("api-key-heading"),
     apiKeyHelp: el("api-key-help"),
+    fallbackList: el("fallback-list"),
+    fallbackAdd: el("fallback-add"),
+    fallbackAddBtn: el("fallback-add-btn"),
     modelGroup: el("model-group"),
     ollamaGroup: el("ollama-group"),
     ollamaStatus: el("ollama-status"),
@@ -415,17 +418,13 @@
     dom.form.hidden = true;
 
     try {
-      // Tesseract and Ollama both read the page here and return the OCR
-      // blocks with the fields, so click-to-fill works for either.
-      let result;
-      if (currentExtractionMethod === "tesseract") {
-        result = await invoke("extract_with_local_ocr", { imageBase64: base64 });
-      } else if (currentExtractionMethod === "ollama") {
-        result = await invoke("extract_with_ollama", { imageBase64: base64 });
-      } else {
-        result = await invoke("extract_from_image", { imageBase64: base64, mediaType });
-      }
-      dom.thumbnailStatus.textContent = "Extracted - review and save below.";
+      // One call: Rust picks the method, and falls through to the next
+      // choice if it fails. Which one answered comes back with the result.
+      const result = await invoke("extract_with_chain", {
+        imageBase64: base64,
+        mediaType,
+      });
+      dom.thumbnailStatus.textContent = describeExtraction(result);
       // Only the local OCR path knows where the text sat on the page.
       currentOcrBlocks = Array.isArray(result.blocks) ? result.blocks : [];
       currentOcrSite = result.site || null;
@@ -443,6 +442,17 @@
       applyExtractedFields({});
       dom.form.hidden = false;
     }
+  }
+
+  /// Says what read the page, and admits when the first choice did not.
+  function describeExtraction(result) {
+    const label = (id) => {
+      const p = providers.find((x) => x.id === id);
+      return p ? p.label : id;
+    };
+    const fellBack = (result.fell_back_from || []).length > 0;
+    if (!fellBack) return "Extracted - review and save below.";
+    return `${label(result.fell_back_from[0])} failed, so ${label(result.used)} read it instead - review and save below.`;
   }
 
   function applyExtractedFields(fields) {
@@ -1358,6 +1368,72 @@
   }
 
   /// Shown for anything that runs a model, key or no key.
+  let fallbackChain = [];
+
+  async function renderFallbacks() {
+    try {
+      fallbackChain = await invoke("get_fallback_chain");
+    } catch (_) {
+      fallbackChain = [];
+    }
+    const label = (id) => {
+      const p = providers.find((x) => x.id === id);
+      return p ? p.label : id;
+    };
+
+    dom.fallbackList.innerHTML = fallbackChain.length
+      ? fallbackChain
+          .map(
+            (id, i) => `<li class="fallback-row">
+              <span class="fallback-rank">${i + 1}.</span>
+              <span class="fallback-name">${escapeHtml(label(id))}</span>
+              <button type="button" data-move="up" data-index="${i}" ${i === 0 ? "disabled" : ""} title="Move up" aria-label="Move ${escapeHtml(label(id))} up">&uarr;</button>
+              <button type="button" data-move="down" data-index="${i}" ${i === fallbackChain.length - 1 ? "disabled" : ""} title="Move down" aria-label="Move ${escapeHtml(label(id))} down">&darr;</button>
+              <button type="button" data-remove="${i}" title="Remove" aria-label="Remove ${escapeHtml(label(id))}">&times;</button>
+            </li>`
+          )
+          .join("")
+      : `<li class="fallback-empty">Nothing yet - a failure means typing the entry in by hand.</li>`;
+
+    // Only methods not already in play: the primary, and anything listed.
+    const taken = new Set([currentExtractionMethod, ...fallbackChain]);
+    const available = providers.filter((p) => !taken.has(p.id));
+    dom.fallbackAdd.innerHTML = available
+      .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)}</option>`)
+      .join("");
+    dom.fallbackAdd.disabled = available.length === 0;
+    dom.fallbackAddBtn.disabled = available.length === 0;
+  }
+
+  async function saveFallbacks(chain) {
+    try {
+      fallbackChain = await invoke("set_fallback_chain", { chain });
+    } catch (_) {
+      /* keep what is on screen; the next render re-reads it */
+    }
+    await renderFallbacks();
+  }
+
+  dom.fallbackAddBtn.addEventListener("click", () => {
+    if (!dom.fallbackAdd.value) return;
+    saveFallbacks([...fallbackChain, dom.fallbackAdd.value]);
+  });
+
+  dom.fallbackList.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const next = [...fallbackChain];
+    if (btn.dataset.remove !== undefined) {
+      next.splice(Number(btn.dataset.remove), 1);
+    } else {
+      const i = Number(btn.dataset.index);
+      const j = btn.dataset.move === "up" ? i - 1 : i + 1;
+      if (j < 0 || j >= next.length) return;
+      [next[i], next[j]] = [next[j], next[i]];
+    }
+    saveFallbacks(next);
+  });
+
   async function renderModelSection() {
     const provider = currentProvider();
     // Ollama gets a picker of what is actually pulled instead, in its own
@@ -1589,6 +1665,7 @@
     await renderApiKeySection();
     await renderModelSection();
     await renderOllamaSection();
+    await renderFallbacks();
   }
 
   dom.extractionMethodSelect.addEventListener("change", async () => {
@@ -1602,6 +1679,9 @@
     await renderApiKeySection();
     await renderModelSection();
     await renderOllamaSection();
+    // Changing the primary can invalidate the fallback list: the backend
+    // drops the new primary from it, and the "add" options shift.
+    await renderFallbacks();
   });
 
   async function refreshApiKeyStatus() {
