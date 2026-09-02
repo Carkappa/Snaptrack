@@ -16,6 +16,7 @@ const STATUS_DEFS_KEY: &str = "status_defs";
 const MODELS_KEY: &str = "provider_models";
 const OCR_HINTS_KEY: &str = "ocr_field_hints";
 const OLLAMA_HOST_KEY: &str = "ollama_host";
+const OLLAMA_UNLOAD_KEY: &str = "ollama_unload_after_use";
 const DEFAULT_OLLAMA_HOST: &str = "http://localhost:11434";
 const UPDATE_CHECK_ENABLED_KEY: &str = "update_check_enabled";
 const AUTO_INSTALL_UPDATES_KEY: &str = "auto_install_updates";
@@ -304,6 +305,37 @@ pub fn get_ollama_host<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> String {
     resolve_ollama_host(&app)
 }
 
+/// Whether to hand the model back to the operating system after each
+/// capture. On by default: several gigabytes held between captures that are
+/// hours apart is not a trade most people would choose, and it is the
+/// opposite of how the rest of the app behaves.
+fn resolve_unload_after_use<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(OLLAMA_UNLOAD_KEY))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+#[tauri::command]
+pub fn get_ollama_unload<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    resolve_unload_after_use(&app)
+}
+
+#[tauri::command]
+pub fn set_ollama_unload<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    enabled: bool,
+) -> Result<(), String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    store.set(OLLAMA_UNLOAD_KEY, serde_json::json!(enabled));
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))
+}
+
 fn resolve_ollama_host<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
     app.store(STORE_FILE)
         .ok()
@@ -470,6 +502,7 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
 ) -> Result<LocalOcrResult, String> {
     let host = resolve_ollama_host(&app);
     let preferred = resolve_model(&app, "ollama");
+    let unload = resolve_unload_after_use(&app);
     let installed = installed_models(&host).await;
 
     // A vision model reads the screenshot itself, so Tesseract is skipped
@@ -481,7 +514,8 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
         .filter(|m| crate::models::is_vision_model(m));
     if let Some(model) = vision_choice {
         let result =
-            extraction::extract_fields_with_ollama_vision(&host, &model, &image_base64).await?;
+            extraction::extract_fields_with_ollama_vision(&host, &model, &image_base64, unload)
+                .await?;
         return Ok(LocalOcrResult {
             result,
             // A vision model produces no text blocks, so click-to-fill has
@@ -522,7 +556,8 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
             })?,
         None => preferred,
     };
-    let result = extraction::extract_fields_from_text(&host, &model, &blocks.join("\n")).await?;
+    let result = extraction::extract_fields_from_text(&host, &model, &blocks.join("\n"), unload)
+            .await?;
 
     Ok(LocalOcrResult {
         result,

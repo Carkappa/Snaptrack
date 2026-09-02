@@ -343,6 +343,17 @@
             <p id="ollama-pull-status" class="hint" hidden></p>
           </div>
 
+          <label class="checkbox-row">
+            <input id="settings-ollama-unload" type="checkbox" />
+            <span>Free the memory after each capture</span>
+          </label>
+          <p class="hint">
+            Ollama otherwise keeps the model in RAM for five minutes after
+            each use. With this on it hands the memory back immediately, and
+            loads the model again next time - a few seconds, against several
+            gigabytes held while you are not using it.
+          </p>
+
           <label for="settings-ollama-host" class="settings-sublabel">Server</label>
           <div class="path-row">
             <input id="settings-ollama-host" type="text" autocomplete="off" spellcheck="false"

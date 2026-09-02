@@ -155,10 +155,26 @@ fn gemini_body(_model: &str, image_base64: &str, media_type: &str) -> serde_json
 /// which are the title. That is language, not layout, so it generalises to
 /// boards no heuristic was ever written for, and a 3B text model does it on
 /// a CPU in a second or two where a vision model would need a GPU.
-fn ollama_body(model: &str, ocr_text: &str) -> serde_json::Value {
+/// How long Ollama holds the model in memory after answering.
+///
+/// Its default is five minutes, which for this app means several gigabytes
+/// sitting in RAM between captures - and captures are minutes or hours
+/// apart. `0` unloads as soon as the reply is sent, at the cost of loading
+/// it again next time. That matches how the rest of the app behaves: inert
+/// until you invoke it.
+fn keep_alive(unload_after_use: bool) -> serde_json::Value {
+    if unload_after_use {
+        serde_json::json!(0)
+    } else {
+        serde_json::json!("5m")
+    }
+}
+
+fn ollama_body(model: &str, ocr_text: &str, unload_after_use: bool) -> serde_json::Value {
     serde_json::json!({
         "model": model,
         "stream": false,
+        "keep_alive": keep_alive(unload_after_use),
         // Ollama enforces a JSON schema the same way the cloud providers do.
         "format": field_schema(),
         "messages": [
@@ -174,10 +190,15 @@ fn ollama_body(model: &str, ocr_text: &str) -> serde_json::Value {
 /// model reads the page the way a person does, so it never inherits an OCR
 /// mistake and does not depend on font-size guesswork to tell a company
 /// from a title.
-fn ollama_vision_body(model: &str, image_base64: &str) -> serde_json::Value {
+fn ollama_vision_body(
+    model: &str,
+    image_base64: &str,
+    unload_after_use: bool,
+) -> serde_json::Value {
     serde_json::json!({
         "model": model,
         "stream": false,
+        "keep_alive": keep_alive(unload_after_use),
         "format": field_schema(),
         "messages": [
             { "role": "system", "content": SYSTEM_PROMPT },
@@ -197,8 +218,9 @@ pub async fn extract_fields_from_text(
     host: &str,
     model: &str,
     ocr_text: &str,
+    unload_after_use: bool,
 ) -> Result<ExtractionResult, String> {
-    ollama_request(host, model, ollama_body(model, ocr_text)).await
+    ollama_request(host, model, ollama_body(model, ocr_text, unload_after_use)).await
 }
 
 /// Sends the screenshot to a vision model, skipping Tesseract.
@@ -206,8 +228,14 @@ pub async fn extract_fields_with_ollama_vision(
     host: &str,
     model: &str,
     image_base64: &str,
+    unload_after_use: bool,
 ) -> Result<ExtractionResult, String> {
-    ollama_request(host, model, ollama_vision_body(model, image_base64)).await
+    ollama_request(
+        host,
+        model,
+        ollama_vision_body(model, image_base64, unload_after_use),
+    )
+    .await
 }
 
 async fn ollama_request(
@@ -718,7 +746,7 @@ mod tests {
 
     #[test]
     fn ollama_is_sent_text_and_a_schema_not_an_image() {
-        let b = ollama_body("qwen2.5:3b", "Amazon\nRobotics Engineer");
+        let b = ollama_body("qwen2.5:3b", "Amazon\nRobotics Engineer", true);
         assert_eq!(b["model"], "qwen2.5:3b");
         assert_eq!(b["stream"], false, "the app waits for one whole answer");
         assert_eq!(b["messages"][0]["content"], SYSTEM_PROMPT);
@@ -733,8 +761,34 @@ mod tests {
 
     #[test]
     fn ollama_gets_the_same_schema_as_the_cloud_providers() {
-        let b = ollama_body("m", "text");
+        let b = ollama_body("m", "text", true);
         assert_eq!(b["format"], field_schema());
         assert!(b["format"]["properties"]["company"].is_object());
+    }
+
+    #[test]
+    fn the_model_is_unloaded_after_answering_by_default() {
+        // Ollama holds a model for five minutes otherwise, which for this
+        // app means gigabytes of RAM sitting idle between captures that are
+        // hours apart.
+        assert_eq!(ollama_body("m", "text", true)["keep_alive"], 0);
+        assert_eq!(ollama_vision_body("m", "DATA", true)["keep_alive"], 0);
+    }
+
+    #[test]
+    fn keeping_it_loaded_uses_ollamas_own_default() {
+        assert_eq!(ollama_body("m", "text", false)["keep_alive"], "5m");
+        assert_eq!(ollama_vision_body("m", "DATA", false)["keep_alive"], "5m");
+    }
+
+    #[test]
+    fn a_vision_model_is_sent_the_image_not_the_text() {
+        let b = ollama_vision_body("minicpm-v:8b", "BASE64DATA", true);
+        assert_eq!(b["messages"][1]["images"][0], "BASE64DATA");
+        assert_eq!(b["format"], field_schema(), "still held to the schema");
+        assert_eq!(
+            b["messages"][0]["content"], SYSTEM_PROMPT,
+            "and told not to invent anything"
+        );
     }
 }

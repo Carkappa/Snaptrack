@@ -82,6 +82,7 @@
       // What a mocked set_excel_path reports back.
       pathChange: { outcome: "Moved", screenshots: 2, backups: 3 },
       ollamaHost: "http://localhost:11434",
+      ollamaUnload: true,
       // A trimmed stand-in for models.rs's ollama_catalogue().
       ollamaCatalogue: [
         { id: "qwen2.5:3b", label: "Qwen 2.5 3B", vision: false, size: "~2 GB", accuracy: "Good", hardware: "Runs on a CPU", description: "Reads the text Tesseract found." },
@@ -294,6 +295,11 @@
         return null;
       },
       get_ollama_host: () => state.ollamaHost,
+      get_ollama_unload: () => state.ollamaUnload,
+      set_ollama_unload: ({ enabled }) => {
+        state.ollamaUnload = enabled;
+        return null;
+      },
       workbook_exists: () => state.workbookExists,
       set_ollama_host: ({ host }) => {
         state.ollamaHost = host.trim() || "http://localhost:11434";

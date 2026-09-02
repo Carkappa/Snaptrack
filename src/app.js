@@ -107,6 +107,7 @@
     ollamaPullBar: el("ollama-pull-bar"),
     ollamaPullStatus: el("ollama-pull-status"),
     ollamaModelDetail: el("ollama-model-detail"),
+    settingsOllamaUnload: el("settings-ollama-unload"),
     settingsOllamaHost: el("settings-ollama-host"),
     settingsOllamaSave: el("settings-ollama-save"),
     settingsOllamaReset: el("settings-ollama-reset"),
@@ -1372,6 +1373,7 @@
     if (provider.id !== "ollama") return;
     try {
       dom.settingsOllamaHost.value = await invoke("get_ollama_host");
+      dom.settingsOllamaUnload.checked = await invoke("get_ollama_unload");
     } catch (_) {
       dom.settingsOllamaHost.value = "";
     }
@@ -1491,6 +1493,14 @@
       dom.ollamaPull.disabled = false;
       dom.ollamaPullProgress.hidden = true;
       dom.ollamaPullBar.style.width = "0%";
+    }
+  });
+
+  dom.settingsOllamaUnload.addEventListener("change", async () => {
+    try {
+      await invoke("set_ollama_unload", { enabled: dom.settingsOllamaUnload.checked });
+    } catch (e) {
+      dom.ollamaStatus.textContent = String(e);
     }
   });
 

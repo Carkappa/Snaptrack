@@ -185,6 +185,8 @@ pub fn run() {
             commands::pull_ollama_model,
             commands::get_ollama_host,
             commands::set_ollama_host,
+            commands::get_ollama_unload,
+            commands::set_ollama_unload,
             commands::get_app_version,
             commands::get_update_check_enabled,
             commands::set_update_check_enabled,
