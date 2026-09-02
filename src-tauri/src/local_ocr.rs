@@ -1870,7 +1870,7 @@ mod tests {
             "the title half is not chrome, even though the block contains some"
         );
         assert!(
-            looks_like_metadata(&merged.text.clone() + " Reposted"),
+            looks_like_metadata(&format!("{} Reposted", merged.text)),
             "and the whole-block text would have been rejected"
         );
     }

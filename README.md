@@ -47,7 +47,7 @@ comes back empty.
 | | Cost | Notes |
 | --- | --- | --- |
 | **Tesseract** (default) | free, offline | Needs [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki) on your `PATH`. Raw text goes to Notes to check against. |
-| **[Ollama](https://ollama.com)** | free, offline | Understands language, not layout, so it copes with any job board. Settings picks up a model you have, or downloads one for you. |
+| **[Ollama](https://ollama.com)** | free, offline | A model on your own machine. Pick from a list with sizes and hardware notes; Settings downloads it for you. **Vision models read the screenshot directly**, skipping Tesseract entirely. |
 | **Claude, ChatGPT, Gemini** | API key | Most accurate. Each key stored separately in your OS keychain. |
 
 Or use none of them and type entries by hand.

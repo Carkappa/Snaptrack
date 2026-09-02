@@ -275,6 +275,30 @@ pub fn extract_with_local_ocr<R: tauri::Runtime>(
     })
 }
 
+/// The models the app offers, each marked with whether it is downloaded.
+#[tauri::command]
+pub async fn ollama_models<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<OllamaCatalogueEntry> {
+    let host = resolve_ollama_host(&app);
+    let installed = installed_models(&host).await.unwrap_or_default();
+    crate::models::ollama_catalogue()
+        .into_iter()
+        .map(|info| {
+            let family = |m: &str| m.split(':').next().unwrap_or(m).to_lowercase();
+            let downloaded = installed
+                .iter()
+                .any(|m| m == &info.id || family(m) == family(&info.id));
+            OllamaCatalogueEntry { info, downloaded }
+        })
+        .collect()
+}
+
+#[derive(serde::Serialize)]
+pub struct OllamaCatalogueEntry {
+    #[serde(flatten)]
+    pub info: crate::models::OllamaModelInfo,
+    pub downloaded: bool,
+}
+
 #[tauri::command]
 pub fn get_ollama_host<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> String {
     resolve_ollama_host(&app)
@@ -334,7 +358,6 @@ async fn installed_models(host: &str) -> Option<Vec<String>> {
 pub async fn ollama_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> OllamaStatus {
     let host = resolve_ollama_host(&app);
     let preferred = resolve_model(&app, "ollama");
-
     let Some(models) = installed_models(&host).await else {
         return OllamaStatus {
             running: false,
@@ -445,6 +468,29 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     image_base64: String,
 ) -> Result<LocalOcrResult, String> {
+    let host = resolve_ollama_host(&app);
+    let preferred = resolve_model(&app, "ollama");
+    let installed = installed_models(&host).await;
+
+    // A vision model reads the screenshot itself, so Tesseract is skipped
+    // entirely and no OCR mistake can be inherited. Decided before the OCR
+    // run rather than after, so nothing is done twice.
+    let vision_choice = installed
+        .as_ref()
+        .and_then(|models| crate::models::best_available_model(&preferred, models))
+        .filter(|m| crate::models::is_vision_model(m));
+    if let Some(model) = vision_choice {
+        let result =
+            extraction::extract_fields_with_ollama_vision(&host, &model, &image_base64).await?;
+        return Ok(LocalOcrResult {
+            result,
+            // A vision model produces no text blocks, so click-to-fill has
+            // nothing to offer - the fields came from the image itself.
+            blocks: Vec::new(),
+            site: None,
+        });
+    }
+
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(image_base64)
         .map_err(|e| format!("Invalid image data: {e}"))?;
@@ -464,11 +510,9 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
     let blocks: Vec<String> = lines.iter().map(|l| l.text.trim().to_string()).collect();
     let site = crate::local_ocr::detect_site(&blocks.join("\n"));
 
-    let host = resolve_ollama_host(&app);
-    let preferred = resolve_model(&app, "ollama");
     // Use whatever is actually pulled rather than failing on a model the
     // user never asked for and does not have.
-    let model = match installed_models(&host).await {
+    let model = match installed {
         Some(models) => crate::models::best_available_model(&preferred, &models)
             .ok_or_else(|| {
                 format!(

@@ -95,6 +95,13 @@ Three lints run in CI, each for a bug that shipped:
 All three fail when their target is reintroduced; if you change one, check
 that still holds.
 
+## Building locally
+
+`cargo test --locked` in `src-tauri` runs the unit tests on Windows. The
+integration tests need a Windows runtime DLL that a bare toolchain does not
+provide - they fail with `STATUS_ENTRYPOINT_NOT_FOUND` locally and pass in
+CI, so let CI cover those rather than chasing it.
+
 ## Things that will bite you
 
 - **The single-instance plugin must stay registered first.** Two copies mean

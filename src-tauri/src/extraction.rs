@@ -168,6 +168,29 @@ fn ollama_body(model: &str, ocr_text: &str) -> serde_json::Value {
     })
 }
 
+/// Ollama's vision path: the model is handed the screenshot itself.
+///
+/// Worth a separate body because it skips Tesseract entirely. A vision
+/// model reads the page the way a person does, so it never inherits an OCR
+/// mistake and does not depend on font-size guesswork to tell a company
+/// from a title.
+fn ollama_vision_body(model: &str, image_base64: &str) -> serde_json::Value {
+    serde_json::json!({
+        "model": model,
+        "stream": false,
+        "format": field_schema(),
+        "messages": [
+            { "role": "system", "content": SYSTEM_PROMPT },
+            {
+                "role": "user",
+                "content": USER_PROMPT,
+                // Ollama takes images on the message, base64 and unprefixed.
+                "images": [image_base64]
+            }
+        ]
+    })
+}
+
 /// Turns text already read off a screenshot into fields, using a model
 /// running on this machine. No key, no network beyond localhost.
 pub async fn extract_fields_from_text(
@@ -175,11 +198,28 @@ pub async fn extract_fields_from_text(
     model: &str,
     ocr_text: &str,
 ) -> Result<ExtractionResult, String> {
+    ollama_request(host, model, ollama_body(model, ocr_text)).await
+}
+
+/// Sends the screenshot to a vision model, skipping Tesseract.
+pub async fn extract_fields_with_ollama_vision(
+    host: &str,
+    model: &str,
+    image_base64: &str,
+) -> Result<ExtractionResult, String> {
+    ollama_request(host, model, ollama_vision_body(model, image_base64)).await
+}
+
+async fn ollama_request(
+    host: &str,
+    model: &str,
+    body: serde_json::Value,
+) -> Result<ExtractionResult, String> {
     let url = format!("{}/api/chat", host.trim_end_matches('/'));
     let response = reqwest::Client::new()
         .post(&url)
         .header("content-type", "application/json")
-        .json(&ollama_body(model, ocr_text))
+        .json(&body)
         .send()
         .await
         .map_err(|e| {

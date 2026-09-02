@@ -106,6 +106,7 @@
     ollamaPullProgress: el("ollama-pull-progress"),
     ollamaPullBar: el("ollama-pull-bar"),
     ollamaPullStatus: el("ollama-pull-status"),
+    ollamaModelDetail: el("ollama-model-detail"),
     settingsOllamaHost: el("settings-ollama-host"),
     settingsOllamaSave: el("settings-ollama-save"),
     settingsOllamaReset: el("settings-ollama-reset"),
@@ -1403,18 +1404,57 @@
       return;
     }
 
-    dom.settingsOllamaModel.innerHTML = status.models
-      .map(
-        (m) =>
-          `<option value="${escapeHtml(m)}" ${m === status.model ? "selected" : ""}>${escapeHtml(m)}</option>`
-      )
-      .join("");
-    dom.ollamaStatus.textContent = `Ready, using ${status.model}. Screenshots stay on this machine.`;
+    await renderOllamaCatalogue(status.model);
+    const chosen = ollamaCatalogue.find((m) => m.id === status.model);
+    dom.ollamaStatus.textContent = chosen
+      ? `Ready, using ${chosen.label}. ${chosen.vision ? "It reads the screenshot itself." : "Tesseract reads the screenshot, it reads the text."} Nothing leaves this machine.`
+      : `Ready, using ${status.model}. Nothing leaves this machine.`;
+  }
+
+  let ollamaCatalogue = [];
+
+  /// Lists what the app offers rather than only what is downloaded, so a
+  /// better model is discoverable instead of something you had to know to
+  /// go looking for. Split by whether it reads the image or the OCR text,
+  /// because that is the difference that actually changes results.
+  async function renderOllamaCatalogue(selected) {
+    try {
+      ollamaCatalogue = await invoke("ollama_models");
+    } catch (_) {
+      ollamaCatalogue = [];
+      return;
+    }
+    const option = (m) =>
+      `<option value="${escapeHtml(m.id)}"${m.id === selected ? " selected" : ""}>` +
+      `${escapeHtml(m.label)} - ${escapeHtml(m.accuracy)}, ${escapeHtml(m.size)}` +
+      `${m.downloaded ? "" : " (not downloaded)"}</option>`;
+    const vision = ollamaCatalogue.filter((m) => m.vision);
+    const text = ollamaCatalogue.filter((m) => !m.vision);
+    dom.settingsOllamaModel.innerHTML =
+      `<optgroup label="Reads the screenshot itself - no Tesseract needed">${vision.map(option).join("")}</optgroup>` +
+      `<optgroup label="Reads the text Tesseract found">${text.map(option).join("")}</optgroup>`;
+    renderOllamaModelDetail(selected);
+  }
+
+  function renderOllamaModelDetail(id) {
+    const m = ollamaCatalogue.find((x) => x.id === id);
+    if (!m) {
+      dom.ollamaModelDetail.hidden = true;
+      return;
+    }
+    dom.ollamaModelDetail.hidden = false;
+    dom.ollamaModelDetail.innerHTML =
+      `${escapeHtml(m.description)}<br><strong>${escapeHtml(m.accuracy)}</strong> · ` +
+      `${escapeHtml(m.size)} · ${escapeHtml(m.hardware)}` +
+      (m.downloaded ? "" : ` · <em>not downloaded yet</em>`);
+    dom.ollamaPullRow.hidden = m.downloaded;
+    if (!m.downloaded) dom.ollamaPull.textContent = `Download ${m.id}`;
   }
 
   dom.settingsOllamaModel.addEventListener("change", async () => {
     try {
       await invoke("set_model", { provider: "ollama", model: dom.settingsOllamaModel.value });
+      renderOllamaModelDetail(dom.settingsOllamaModel.value);
       await refreshOllamaStatus();
     } catch (e) {
       dom.ollamaStatus.textContent = String(e);
@@ -1515,10 +1555,23 @@
       currentExtractionMethod = "tesseract";
     }
 
-    dom.extractionMethodSelect.innerHTML = providers
-      .map(
-        (p) =>
-          `<option value="${escapeHtml(p.id)}"${p.id === currentExtractionMethod ? " selected" : ""}>${escapeHtml(p.label)}</option>`
+    // Grouped so the choice reads as "what kind of thing" first and "which
+    // one" second: offline and cloud are different decisions, not five
+    // equivalent options.
+    const groups = [];
+    for (const p of providers) {
+      const name = p.group || "";
+      const existing = groups.find((g) => g.name === name);
+      if (existing) existing.items.push(p);
+      else groups.push({ name, items: [p] });
+    }
+    const option = (p) =>
+      `<option value="${escapeHtml(p.id)}"${p.id === currentExtractionMethod ? " selected" : ""}>${escapeHtml(p.label)}</option>`;
+    dom.extractionMethodSelect.innerHTML = groups
+      .map((g) =>
+        g.name
+          ? `<optgroup label="${escapeHtml(g.name)}">${g.items.map(option).join("")}</optgroup>`
+          : g.items.map(option).join("")
       )
       .join("");
 

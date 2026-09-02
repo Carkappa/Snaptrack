@@ -1507,6 +1507,15 @@ button.detail-row.active {
   font-style: italic;
 }
 
+.model-detail {
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
+.model-detail strong {
+  color: var(--fg);
+}
+
 .settings-sublabel {
   display: block;
   margin-top: 12px;

@@ -30,6 +30,9 @@ pub struct ExtractionProvider {
     /// The model used unless the user overrides it. Empty for a provider
     /// that has no model to choose.
     pub default_model: String,
+    /// Heading the method is listed under, so the choice reads as "which
+    /// kind of thing" first and "which one" second.
+    pub group: String,
 }
 
 impl ExtractionProvider {
@@ -41,6 +44,7 @@ impl ExtractionProvider {
         key_placeholder: &str,
         key_help: &str,
         default_model: &str,
+        group: &str,
     ) -> Self {
         Self {
             id: id.to_string(),
@@ -50,17 +54,162 @@ impl ExtractionProvider {
             key_placeholder: key_placeholder.to_string(),
             key_help: key_help.to_string(),
             default_model: default_model.to_string(),
+            group: group.to_string(),
         }
     }
 }
 
 pub const DEFAULT_PROVIDER: &str = "tesseract";
 
+const ON_MACHINE: &str = "On this machine - free, nothing leaves it";
+const CLOUD: &str = "Cloud - needs an API key";
+
 /// Models known to be small, fast on a CPU, and good at returning JSON,
 /// best first. Used only to choose among what the user already has pulled.
 const MODEL_PREFERENCE: [&str; 6] = [
     "qwen2.5", "llama3.2", "llama3.1", "mistral", "phi3", "gemma2",
 ];
+
+/// A model the app can offer, with enough detail to choose between them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaModelInfo {
+    pub id: String,
+    pub label: String,
+    /// True when the model reads the screenshot itself. A text model reads
+    /// what Tesseract already turned into words.
+    pub vision: bool,
+    pub size: String,
+    /// Qualitative, from published comparisons and parameter count - not
+    /// measured here. The UI says so rather than implying a benchmark.
+    pub accuracy: String,
+    pub hardware: String,
+    pub description: String,
+}
+
+fn model(
+    id: &str,
+    label: &str,
+    vision: bool,
+    size: &str,
+    accuracy: &str,
+    hardware: &str,
+    description: &str,
+) -> OllamaModelInfo {
+    OllamaModelInfo {
+        id: id.to_string(),
+        label: label.to_string(),
+        vision,
+        size: size.to_string(),
+        accuracy: accuracy.to_string(),
+        hardware: hardware.to_string(),
+        description: description.to_string(),
+    }
+}
+
+/// Models worth offering, roughly cheapest first within each kind.
+///
+/// Only models actually in Ollama's library: anything else cannot be
+/// pulled, so listing it would be an invitation to a dead end.
+pub fn ollama_catalogue() -> Vec<OllamaModelInfo> {
+    vec![
+        model(
+            "qwen2.5:3b",
+            "Qwen 2.5 3B",
+            false,
+            "~2 GB",
+            "Good",
+            "Runs on a CPU",
+            "Tesseract reads the screenshot, this works out which words are the company and which are the title. The lightest thing that does the job.",
+        ),
+        model(
+            "qwen2.5:7b",
+            "Qwen 2.5 7B",
+            false,
+            "~4.7 GB",
+            "Better",
+            "Runs on a CPU, slower",
+            "The same job as the 3B, with more room to get an awkward layout right.",
+        ),
+        model(
+            "moondream",
+            "Moondream 1.8B",
+            true,
+            "~1.7 GB",
+            "Good",
+            "Runs on a CPU",
+            "Reads the screenshot itself, so it never sees Tesseract's mistakes. Small enough to be practical without a graphics card.",
+        ),
+        model(
+            "granite3.2-vision:2b",
+            "Granite 3.2 Vision 2B",
+            true,
+            "~2.4 GB",
+            "Good",
+            "Runs on a CPU",
+            "Built for reading documents and screenshots rather than photographs.",
+        ),
+        model(
+            "deepseek-ocr:3b",
+            "DeepSeek-OCR 3B",
+            true,
+            "~2 GB",
+            "Better",
+            "Runs on a CPU",
+            "Purpose-built for pulling text out of documents, which is exactly what a job posting is.",
+        ),
+        model(
+            "qwen2.5vl:3b",
+            "Qwen2.5-VL 3B",
+            true,
+            "~3.2 GB",
+            "Better",
+            "Runs on a CPU",
+            "Reads the page and understands the layout, so the company and title do not depend on font-size guesswork.",
+        ),
+        model(
+            "minicpm-v:8b",
+            "MiniCPM-V 8B",
+            true,
+            "~5.5 GB",
+            "Best",
+            "Much better with a GPU",
+            "One of the strongest open models at reading text in images. Worth it if you have the hardware.",
+        ),
+        model(
+            "qwen2.5vl:7b",
+            "Qwen2.5-VL 7B",
+            true,
+            "~6 GB",
+            "Best",
+            "Much better with a GPU",
+            "Larger sibling of the 3B, and noticeably better on a cluttered page.",
+        ),
+        model(
+            "llama3.2-vision:11b",
+            "Llama 3.2 Vision 11B",
+            true,
+            "~7.9 GB",
+            "Best",
+            "Wants a GPU",
+            "The heaviest option offered. Only sensible with a graphics card.",
+        ),
+    ]
+}
+
+/// Whether a model reads images. Unknown models are assumed text-only:
+/// sending an image to a text model wastes a request, while sending text
+/// to a vision model still works.
+pub fn is_vision_model(id: &str) -> bool {
+    if let Some(info) = ollama_catalogue().into_iter().find(|m| m.id == id) {
+        return info.vision;
+    }
+    let lower = id.to_lowercase();
+    // A model pulled by hand still gets recognised by the naming every
+    // vision model in the library follows.
+    ["vl", "vision", "llava", "minicpm-v", "moondream", "ocr"]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
 
 /// Picks a usable model out of what Ollama has actually pulled.
 ///
@@ -161,12 +310,13 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
     vec![
         ExtractionProvider::new(
             "tesseract",
-            "Tesseract - free, offline, no key",
+            "Tesseract - text recognition only",
             false,
             "",
             "",
             "",
             "",
+            ON_MACHINE,
         ),
         ExtractionProvider::new(
             "ollama",
@@ -176,6 +326,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "",
             "",
             "qwen2.5:3b",
+            ON_MACHINE,
         ),
         ExtractionProvider::new(
             "claude",
@@ -185,6 +336,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "sk-ant-...",
             "Create one at console.anthropic.com under API Keys.",
             "claude-sonnet-5",
+            CLOUD,
         ),
         ExtractionProvider::new(
             "openai",
@@ -194,6 +346,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "sk-...",
             "Create one at platform.openai.com/api-keys.",
             "gpt-4o",
+            CLOUD,
         ),
         ExtractionProvider::new(
             "gemini",
@@ -203,6 +356,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "AIza...",
             "Create one at aistudio.google.com/apikey.",
             "gemini-2.0-flash",
+            CLOUD,
         ),
     ]
 }
@@ -274,6 +428,17 @@ mod provider_tests {
             p.key_label.is_empty() && p.key_placeholder.is_empty(),
             "and must carry no key wording for the UI to show"
         );
+    }
+
+    #[test]
+    fn every_provider_is_grouped_and_only_two_groups_exist() {
+        let mut groups: Vec<String> = extraction_providers().into_iter().map(|p| p.group).collect();
+        assert!(groups.iter().all(|g| !g.is_empty()), "an ungrouped method has nowhere to appear");
+        groups.sort();
+        groups.dedup();
+        assert_eq!(groups.len(), 2, "offline versus cloud is the distinction that matters");
+        assert_eq!(find_provider("ollama").unwrap().group, ON_MACHINE);
+        assert_eq!(find_provider("claude").unwrap().group, CLOUD);
     }
 
     #[test]
