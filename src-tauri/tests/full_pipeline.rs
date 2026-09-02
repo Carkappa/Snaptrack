@@ -254,8 +254,18 @@ fn extracts_from_a_real_screenshot() {
     let bytes = std::fs::read(&path).expect("should be able to read OCR_TEST_IMAGE");
     let base64_str = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
-    let result = commands::extract_with_local_ocr(base64_str).expect("extraction should not error");
-    match result {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+    let result = commands::extract_with_local_ocr(handle, base64_str)
+        .expect("extraction should not error");
+
+    println!("detected board:  {:?}", result.site);
+    println!("blocks read ({}):", result.blocks.len());
+    for (i, block) in result.blocks.iter().enumerate() {
+        println!("  [{i}] {block}");
+    }
+
+    match result.result {
         ExtractionResult::Parsed { fields } => {
             println!("company:         {:?}", fields.company);
             println!("position:        {:?}", fields.position);

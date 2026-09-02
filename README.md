@@ -71,6 +71,21 @@ comes back empty for you to fill in.
 
 You can also use neither and type entries by hand.
 
+### When it guesses wrong
+
+Two things make that cheap rather than annoying:
+
+**Click a block to fill a field.** With Tesseract, the text blocks it found
+are listed under the thumbnail. Click a field, click a block, and that text
+goes in. Layout guesswork will always lose on some site's design; this works
+on any layout, including ones nobody tuned for.
+
+**It learns from your corrections.** When you save, the app notes where on the
+page the values you kept actually sat, keyed to the job board it recognised.
+The next capture from that board starts from your correction instead of the
+guess. Nothing to configure — the corrections you were already making are the
+signal.
+
 ## What else it does
 
 - **Calendar** — a month grid shaded by how many applications went out each

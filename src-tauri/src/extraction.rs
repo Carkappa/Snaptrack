@@ -127,7 +127,10 @@ fn openai_body(model: &str, image_base64: &str, media_type: &str) -> serde_json:
     })
 }
 
-fn gemini_body(model: &str, image_base64: &str, media_type: &str) -> serde_json::Value {
+/// `model` is unused here on purpose: Gemini names the model in the URL
+/// path rather than the request body. Kept in the signature so all three
+/// builders are called the same way.
+fn gemini_body(_model: &str, image_base64: &str, media_type: &str) -> serde_json::Value {
     serde_json::json!({
         "systemInstruction": { "parts": [{ "text": SYSTEM_PROMPT }] },
         "contents": [{

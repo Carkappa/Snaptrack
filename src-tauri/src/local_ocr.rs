@@ -147,6 +147,7 @@ pub struct SubLine {
 
 impl OcrLine {
     /// Convenience for tests and callers that don't care about sub-lines.
+    #[cfg(test)]
     pub fn flat(text: &str, top: f32, height: f32) -> Self {
         Self {
             text: text.to_string(),
