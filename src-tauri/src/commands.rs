@@ -562,7 +562,6 @@ pub fn get_excel_path<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Str
     Ok(path.to_string_lossy().to_string())
 }
 
-#[tauri::command]
 /// What happened when the workbook path changed.
 #[derive(Debug, serde::Serialize, PartialEq)]
 #[serde(tag = "outcome")]
