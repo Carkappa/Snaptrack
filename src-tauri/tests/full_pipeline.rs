@@ -8,6 +8,18 @@ use base64::Engine;
 use job_tracker_lib::commands;
 use job_tracker_lib::models::{ExtractedFields, ExtractionResult, JobApplication, SaveResult};
 
+/// The settings store is a real file shared by every mock app in this
+/// process, and cargo runs these tests in parallel. Anything that reads or
+/// writes the status list takes this first, so one test cannot observe
+/// another's list mid-edit. Poisoning is ignored - a panic in one test
+/// should surface as that test's own failure, not as a lock error in
+/// every other one.
+static STATUS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock_statuses() -> std::sync::MutexGuard<'static, ()> {
+    STATUS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
     tauri::test::mock_builder()
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -44,6 +56,7 @@ fn amazon_application() -> JobApplication {
 
 #[test]
 fn full_capture_to_excel_pipeline() {
+    let _guard = lock_statuses();
     let app = build_test_app();
     let handle = app.handle().clone();
 
@@ -59,7 +72,12 @@ fn full_capture_to_excel_pipeline() {
         xlsx_path.to_string_lossy()
     );
 
-    // Status dropdown source of truth.
+    // The status list is persisted, and the store file is shared by every
+    // mock app in this process, so a test that edits it would otherwise leak
+    // into this one. Set what this test expects, the same way it sets the
+    // workbook path.
+    commands::set_status_defs(handle.clone(), job_tracker_lib::models::default_status_defs())
+        .expect("defaults should be accepted");
     assert_eq!(
         commands::get_statuses(handle.clone()),
         vec!["Applied", "Interviewing", "Offered", "Rejected", "Ghosted", "Withdrawn"]
@@ -347,6 +365,7 @@ fn deleting_refuses_when_the_row_is_not_the_one_the_user_saw() {
 fn editing_the_status_list_leaves_existing_rows_alone() {
     use job_tracker_lib::models::{StatusDef, StatusKind};
 
+    let _guard = lock_statuses();
     let app = build_test_app();
     let handle = app.handle().clone();
 
@@ -388,14 +407,22 @@ fn editing_the_status_list_leaves_existing_rows_alone() {
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].status, "Ghosted");
     assert_eq!(rows[1].status, "Phone screen");
+
+    // The store is shared across mock apps in this process; put the defaults
+    // back so this test cannot colour another one.
+    commands::set_status_defs(handle, job_tracker_lib::models::default_status_defs()).unwrap();
 }
 
 #[test]
 fn an_unusable_status_list_is_refused() {
     use job_tracker_lib::models::{StatusDef, StatusKind};
 
+    let _guard = lock_statuses();
     let app = build_test_app();
     let handle = app.handle().clone();
+
+    commands::set_status_defs(handle.clone(), job_tracker_lib::models::default_status_defs())
+        .expect("defaults should be accepted");
 
     assert!(commands::set_status_defs(handle.clone(), vec![]).is_err());
     assert!(commands::set_status_defs(
