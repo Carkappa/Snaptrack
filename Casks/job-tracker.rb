@@ -4,12 +4,12 @@
 #   brew install --cask job-tracker
 #
 # The repo (or at least its release assets) must be public for this to
-# work for anyone but you. After each release, update `version` and
-# `sha256` - get the checksum with:
-#   shasum -a 256 "Job Tracker_<version>_aarch64.dmg"
+# work for anyone but you. `version` is set by ./scripts/set-version.sh
+# before a release; `sha256` by ./scripts/update-checksums.sh <version>
+# after the release has built, since it hashes what CI actually produced.
 cask "job-tracker" do
   version "0.6.0"
-  sha256 :no_check
+  sha256 "fcea0687d2bdb6db10b8fc4e74e906dd156fb61c6b121d048b0b2e04980bbdb8"
 
   url "https://github.com/Carkappa/Snaptrack/releases/download/v#{version}/Job.Tracker_#{version}_aarch64.dmg",
       verified: "github.com/Carkappa/Snaptrack/"

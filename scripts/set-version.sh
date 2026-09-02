@@ -32,11 +32,17 @@ perl -0pi -e "s/^version = \"[^\"]*\"/version = \"$version\"/m" src-tauri/Cargo.
 perl -pi -e "s/^  version \"[^\"]*\"/  version \"$version\"/" Casks/job-tracker.rb
 perl -pi -e "s/^    \"version\": \"[^\"]*\"/    \"version\": \"$version\"/" bucket/job-tracker.json
 
+# Scoop's concrete download URL carries the version twice, and it is not the
+# same field as "version". Missing it left the manifest claiming one version
+# while pointing at another release's installer - which, once that release was
+# deleted, meant every `scoop install` 404'd.
+perl -pi -e "s{releases/download/v[^/]+/Job\.Tracker_[^_]+_x64-setup\.exe}{releases/download/v$version/Job.Tracker_${version}_x64-setup.exe}" bucket/job-tracker.json
+
 echo "Set version to $version in:"
 echo "  src-tauri/Cargo.toml   (source of truth; tauri.conf.json inherits it)"
 echo "  Casks/job-tracker.rb"
-echo "  bucket/job-tracker.json"
+echo "  bucket/job-tracker.json   (version and download URL)"
 echo
 echo "Next: commit, then 'git tag v$version && git push origin v$version'."
-echo "Remember the release has to be published, not left as a draft, before"
-echo "installed copies will see it."
+echo "Once the release has built, run ./scripts/update-checksums.sh $version"
+echo "so Homebrew and Scoop verify what they download."

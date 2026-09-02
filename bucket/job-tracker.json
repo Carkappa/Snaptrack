@@ -5,8 +5,8 @@
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/Carkappa/Snaptrack/releases/download/v0.1.0/Job.Tracker_0.1.0_x64-setup.exe#/setup.exe",
-            "hash": "0000000000000000000000000000000000000000000000000000000000000000"
+            "url": "https://github.com/Carkappa/Snaptrack/releases/download/v0.6.0/Job.Tracker_0.6.0_x64-setup.exe#/setup.exe",
+            "hash": "708f73ea698dd1172aff65d0e48b9b1d21f5699b870fb042f8f91dc18f477916"
         }
     },
     "installer": {

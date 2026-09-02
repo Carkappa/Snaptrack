@@ -84,6 +84,14 @@ about what a status looks like.
   source of truth and `tauri.conf.json` has no `version` field. A release
   whose version is not newer than what is installed is silently never offered
   as an update; the release workflow guards the tag against the crate version.
+- **Two files carry the version in more than one place.** Scoop's manifest
+  repeats it inside the download URL, and that is not the `"version"` field;
+  they drifted apart for five releases, leaving `scoop install` pointing at a
+  deleted tag. `set-version.sh` now rewrites both - check it still does if you
+  touch that manifest.
+- **Checksums come after the release, not before.** `update-checksums.sh
+  <version>` hashes what CI actually published. Until it runs, Scoop refuses
+  the download and Homebrew verifies nothing.
 - **Never create a release from the tag page.** The workflow publishes the
   release itself. Making one by hand from a tag creates a *second*, empty
   release on that tag - GitHub allows it - and the installers CI built stay
