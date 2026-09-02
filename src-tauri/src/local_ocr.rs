@@ -160,6 +160,26 @@ impl OcrLine {
     }
 }
 
+/// How big the text in a block actually is.
+///
+/// Not the same as the block's bounding box, which is what this used to
+/// compare: a row of chips with rounded borders spans a tall box while its
+/// text is small, and a title that wrapped onto two lines has a box twice
+/// its type size. Comparing boxes made "On-site" in a pill outrank the job
+/// title. The tallest line inside a block is the thing that tracks type
+/// size, so that is what the title heuristic ranks by.
+fn type_size(block: &OcrLine) -> f32 {
+    let tallest = block
+        .sub_lines
+        .iter()
+        .fold(0.0_f32, |acc, l| acc.max(l.height));
+    if tallest > 0.0 {
+        tallest
+    } else {
+        block.height
+    }
+}
+
 /// A first line noticeably smaller than the rest of its block is a
 /// different thing from what follows - on every job board that means the
 /// company sitting above the title.
@@ -502,10 +522,18 @@ pub fn guess_fields(lines: &[OcrLine]) -> ExtractedFields {
         .collect::<Vec<_>>()
         .join("\n");
 
+    // The title is the largest *text* on the page. Blocks that carry no
+    // real words - a chip border read as ") )", stray punctuation - are not
+    // candidates however big their box is.
     let title_index = sorted
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| a.height.partial_cmp(&b.height).unwrap_or(std::cmp::Ordering::Equal))
+        .filter(|(_, l)| l.text.chars().filter(|c| c.is_alphanumeric()).count() >= 3)
+        .max_by(|(_, a), (_, b)| {
+            type_size(a)
+                .partial_cmp(&type_size(b))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .map(|(i, _)| i);
 
     // Tesseract often folds the company and the title into one paragraph.
@@ -1006,5 +1034,112 @@ mod tests {
         let (company, title) = split_company_from_title(&lines[0]).expect("should split");
         assert_eq!(company, "Amazon");
         assert_eq!(title, "Robotics Engineer");
+    }
+
+    /// The same LinkedIn card once preprocessing separated the blocks
+    /// properly. The trap here is the chip row: rounded pill borders make
+    /// its bounding box taller than the title's, while its text is small.
+    /// Ranking by box size picked it as the job title.
+    fn separated_amazon_blocks() -> Vec<OcrLine> {
+        vec![
+            OcrLine::flat("Amazon", 10.0, 12.0),
+            OcrLine {
+                text: "Robotics - Software Development Engineer Fall Intern/Co-op - 2026".into(),
+                top: 30.0,
+                height: 44.0, // two wrapped lines
+                sub_lines: vec![
+                    SubLine { text: "Robotics - Software Development Engineer Fall".into(), height: 21.0 },
+                    SubLine { text: "Intern/Co-op - 2026".into(), height: 21.0 },
+                ],
+            },
+            OcrLine::flat("Westboro, WI - 5 days ago - 42 people clicked apply", 80.0, 11.0),
+            OcrLine::flat("Promoted by hirer - Responses managed off LinkedIn", 100.0, 11.0),
+            OcrLine {
+                // A pill's border spans far more than its text.
+                text: "On-site ) ) Full-time".into(),
+                top: 120.0,
+                height: 46.0,
+                sub_lines: vec![SubLine { text: "On-site ) ) Full-time".into(), height: 12.0 }],
+            },
+        ]
+    }
+
+    #[test]
+    fn a_chip_row_does_not_outrank_the_job_title() {
+        let f = guess_fields(&separated_amazon_blocks());
+        let position = f.position.expect("a position should be found");
+        assert!(
+            position.starts_with("Robotics - Software Development Engineer"),
+            "the title must win over a chip whose box is taller, got {position:?}"
+        );
+        assert_eq!(
+            f.company.as_deref(),
+            Some("Amazon"),
+            "with the right title, the company is the block above it"
+        );
+    }
+
+    #[test]
+    fn the_chips_are_read_as_chips_not_as_the_title() {
+        let f = guess_fields(&separated_amazon_blocks());
+        assert_eq!(f.work_type.as_deref(), Some("On-site"));
+        assert_eq!(
+            f.employment_type.as_deref(),
+            Some("Full-time"),
+            "Intern/Co-op in the title must not win over the actual badge"
+        );
+        assert_eq!(f.location.as_deref(), Some("Westboro, WI"));
+    }
+
+    #[test]
+    fn type_size_measures_text_not_the_bounding_box() {
+        let wrapped_title = OcrLine {
+            text: "two lines".into(),
+            top: 0.0,
+            height: 44.0,
+            sub_lines: vec![
+                SubLine { text: "line one".into(), height: 21.0 },
+                SubLine { text: "line two".into(), height: 21.0 },
+            ],
+        };
+        let tall_chip = OcrLine {
+            text: "On-site".into(),
+            top: 0.0,
+            height: 46.0,
+            sub_lines: vec![SubLine { text: "On-site".into(), height: 12.0 }],
+        };
+        assert!(
+            tall_chip.height > wrapped_title.height,
+            "the chip's box really is taller - that was the trap"
+        );
+        assert!(
+            type_size(&wrapped_title) > type_size(&tall_chip),
+            "but its text is smaller, which is what should decide"
+        );
+    }
+
+    #[test]
+    fn a_block_of_punctuation_is_never_the_title() {
+        let lines = vec![
+            OcrLine::flat("Acme", 0.0, 10.0),
+            OcrLine::flat("Senior Engineer", 20.0, 18.0),
+            OcrLine {
+                text: ") ) (".into(),
+                top: 50.0,
+                height: 60.0,
+                sub_lines: vec![SubLine { text: ") ) (".into(), height: 40.0 }],
+            },
+        ];
+        assert_eq!(
+            guess_fields(&lines).position.as_deref(),
+            Some("Senior Engineer"),
+            "border artifacts carry no words and cannot be a title"
+        );
+    }
+
+    #[test]
+    fn type_size_falls_back_to_the_box_when_there_are_no_sub_lines() {
+        let bare = OcrLine { text: "x".into(), top: 0.0, height: 17.0, sub_lines: vec![] };
+        assert_eq!(type_size(&bare), 17.0);
     }
 }
