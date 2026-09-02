@@ -1697,7 +1697,26 @@ pub fn open_screenshot<R: tauri::Runtime>(
 /// in by hand" into a pause.
 #[tauri::command]
 pub fn get_fallback_chain<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<String> {
-    read_fallback_chain(&app)
+    effective_fallbacks(&app)
+}
+
+/// The stored list minus anything that cannot be a fallback now.
+///
+/// The saved list was filtered against the primary at the time it was
+/// saved, which stops being true the moment the primary changes. Picking a
+/// method already in the list otherwise left it in both places: it ran
+/// twice per capture - two waits, two charges - and reported the same
+/// failure twice. Filtered on the way out, so the stored order survives
+/// switching the primary back and forth.
+fn effective_fallbacks<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
+    let primary = get_extraction_method(app.clone()).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    read_fallback_chain(app)
+        .into_iter()
+        .filter(|id| id != &primary)
+        .filter(|id| crate::models::find_provider(id).is_some())
+        .filter(|id| seen.insert(id.clone()))
+        .collect()
 }
 
 fn read_fallback_chain<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
@@ -1753,18 +1772,31 @@ pub struct ChainResult {
 /// Several of these carry a paragraph of installation advice, which is
 /// useful on its own and unreadable stacked three deep.
 fn first_sentence(message: &str) -> String {
+    const LIMIT: usize = 160;
     let trimmed = message.trim();
-    let cut = trimmed
+
+    // Counted in characters throughout. `find` returns a byte offset, and
+    // taking that many *characters* silently keeps too much the moment a
+    // provider's message contains a curly quote or a dash - which they do.
+    let sentence_end = trimmed
         .find(". ")
-        .map(|i| i + 1)
-        .unwrap_or(trimmed.len())
-        .min(160);
-    let short: String = trimmed.chars().take(cut).collect();
-    if short.len() < trimmed.len() {
-        format!("{}...", short.trim_end_matches('.').trim())
-    } else {
-        short
+        .map(|byte_idx| trimmed[..=byte_idx].chars().count());
+    let total = trimmed.chars().count();
+    let cut = sentence_end.unwrap_or(total).min(LIMIT);
+
+    if cut >= total {
+        return trimmed.to_string();
     }
+
+    let mut short: String = trimmed.chars().take(cut).collect();
+    // A hard limit lands mid-word; back up to the last space so it reads
+    // as a truncation rather than a typo.
+    if sentence_end.map(|e| e > LIMIT).unwrap_or(true) {
+        if let Some(space) = short.rfind(' ') {
+            short.truncate(space);
+        }
+    }
+    format!("{}...", short.trim_end_matches(['.', ',', ' ']))
 }
 
 #[cfg(test)]
@@ -1810,7 +1842,7 @@ pub async fn extract_with_chain<R: tauri::Runtime>(
 ) -> Result<ChainResult, String> {
     let primary = get_extraction_method(app.clone())?;
     let mut chain = vec![primary];
-    chain.extend(read_fallback_chain(&app));
+    chain.extend(effective_fallbacks(&app));
 
     let mut failed = Vec::new();
     let mut errors: Vec<String> = Vec::new();

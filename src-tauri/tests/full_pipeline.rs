@@ -866,3 +866,40 @@ fn every_provider_keeps_its_own_key_slot() {
         "TAMU is a different service that happens to speak the same protocol"
     );
 }
+
+/// The saved list is filtered against the primary at save time, which stops
+/// being true the moment the primary changes. Leaving it there made that
+/// method run twice per capture - two waits and two charges - and report
+/// the same failure twice.
+#[test]
+fn changing_the_primary_removes_it_from_the_fallbacks() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    commands::set_extraction_method(handle.clone(), "tesseract".into()).unwrap();
+    commands::set_fallback_chain(
+        handle.clone(),
+        vec!["gemini".into(), "openai".into()],
+    )
+    .unwrap();
+    assert_eq!(
+        commands::get_fallback_chain(handle.clone()),
+        vec!["gemini".to_string(), "openai".to_string()]
+    );
+
+    // Now make Gemini the primary. It must stop being a fallback too.
+    commands::set_extraction_method(handle.clone(), "gemini".into()).unwrap();
+    assert_eq!(
+        commands::get_fallback_chain(handle.clone()),
+        vec!["openai".to_string()],
+        "the primary cannot be its own fallback"
+    );
+
+    // Switching away restores it - the stored order was never destroyed.
+    commands::set_extraction_method(handle.clone(), "tesseract".into()).unwrap();
+    assert_eq!(
+        commands::get_fallback_chain(handle),
+        vec!["gemini".to_string(), "openai".to_string()],
+        "filtering happens on the way out, not by rewriting what was saved"
+    );
+}

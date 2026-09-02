@@ -1090,4 +1090,33 @@ mod tests {
             "the token limit goes with the last step, since a gateway that              refuses response_format often refuses this too"
         );
     }
+
+    #[test]
+    fn a_message_with_a_curly_quote_is_still_cut_correctly() {
+        // find() gives a byte offset; taking that many characters keeps too
+        // much the moment the text is not pure ASCII, and providers do use
+        // curly quotes.
+        let msg = "Couldn\u{2019}t reach the service. Install it with `brew install tesseract` and try again.";
+        let short = crate::commands::first_sentence_for_test(msg);
+        assert_eq!(short, "Couldn\u{2019}t reach the service...");
+        assert!(!short.contains("brew"), "the advice is dropped: {short}");
+    }
+
+    #[test]
+    fn a_long_first_sentence_is_cut_at_a_word() {
+        let msg = "The request failed because ".to_string() + &"something ".repeat(30);
+        let short = crate::commands::first_sentence_for_test(&msg);
+        assert!(short.chars().count() < 180, "still trimmed: {short}");
+        assert!(short.ends_with("..."));
+        assert!(
+            !short.trim_end_matches("...").ends_with("someth"),
+            "cut at a space, not mid-word: {short}"
+        );
+    }
+
+    #[test]
+    fn a_short_message_is_left_exactly_as_it_is() {
+        let msg = "API key not valid";
+        assert_eq!(crate::commands::first_sentence_for_test(msg), msg);
+    }
 }
