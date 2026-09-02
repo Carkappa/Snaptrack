@@ -82,7 +82,11 @@ jobs:
           # succeeds, but it produces no update manifest - see the README's
           # "Automatic updates" section for generating the keypair.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Deliberately absent. The signing key is passwordless, and an
+          # empty TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not the same as no
+          # password: macOS accepted it and Windows rejected the key with
+          # "Wrong password for that key". If you switch to a passworded
+          # key, add the variable back with its value.
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Job Tracker ${{ github.ref_name }}"

@@ -396,7 +396,12 @@ key is lost or exposed.
    | Secret | Value |
    | --- | --- |
    | `TAURI_SIGNING_PRIVATE_KEY` | **base64 of** `~/.tauri/snaptrack.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the passphrase, or empty for `-W` |
+   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | only for a passworded key — see below |
+
+   With a passwordless (`-W`) key, leave that second secret **unset and
+   absent from the workflow's `env:`**. An empty value is not the same as
+   no value: macOS accepted it and Windows failed the build with "Wrong
+   password for that key".
 
    ```bash
    base64 -w0 ~/.tauri/snaptrack.key | gh secret set TAURI_SIGNING_PRIVATE_KEY
