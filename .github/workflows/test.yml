@@ -41,6 +41,16 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      # Cargo resolves and rewrites the lockfile here whether or not the
+      # committed one was current. Publishing it means a machine without a
+      # Rust toolchain can still commit an accurate lock.
+      - name: Upload the resolved lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-lock
+          path: src-tauri/Cargo.lock
+
   # The frontend has no build step and no npm dependencies, and this keeps it
   # that way: a static server plus the Chrome already on the runner. The test
   # page writes its own verdict into #summary, so `--dump-dom` after the page
