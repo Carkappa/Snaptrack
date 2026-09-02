@@ -56,6 +56,18 @@ fn show_and_focus_main_window(app: &tauri::AppHandle) {
 
 pub fn run() {
     tauri::Builder::default()
+        // Must be registered first, before any plugin that could take a
+        // lock or bind something the second copy would also want.
+        //
+        // Only one copy may run: a tray app with two instances gives two
+        // tray icons, a global shortcut owned by whichever started first,
+        // and - the part that can actually lose data - two processes each
+        // reading the whole workbook and writing it back over the other.
+        // A second launch surfaces the window of the copy already running
+        // and exits, which is also what clicking the shortcut should do.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_and_focus_main_window(app);
+        }))
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())

@@ -69,6 +69,9 @@ about what a status looks like.
 
 ## Things that will bite you
 
+- **The single-instance plugin must stay registered first.** Two copies mean
+  two tray icons, a global shortcut owned by whichever started first, and two
+  processes each rewriting the whole workbook over the other.
 - **`[hidden]` needs the explicit rule in `styles.css`.** The UA's
   `[hidden] { display: none }` loses to any author rule setting `display`,
   and several panels set one. Removing `[hidden] { display: none !important }`

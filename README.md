@@ -9,6 +9,8 @@ for you — reviewed and saved straight into an Excel workbook.
 - **Vanilla HTML/CSS/JS** frontend — no React, no bundler, no `npm install`
 - No background polling, no timers, no server process. The app is inert
   until you invoke it via the tray icon or the global hotkey.
+- Only ever one copy running. Launching it again brings the existing
+  window forward instead of starting a second tray icon.
 - **Updates itself.** One check on launch, at most once a day; a new
   version downloads and installs on its own, waiting until you have no
   unsaved entry open. Both the checking and the auto-install are
