@@ -13,9 +13,10 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tauri_plugin_updater::UpdaterExt;
 
-/// Placeholder shipped in `tauri.conf.json`. Until the repo owner generates a
-/// signing keypair and replaces it, checking would fail with an opaque
-/// signature error - so it's detected up front and reported plainly instead.
+/// Left over from an earlier config. Still checked so an app built from a
+/// tree that carries it reports plainly rather than failing with an opaque
+/// signature error; `tauri.conf.json` now ships an empty pubkey instead,
+/// which the bundler treats as "no signing configured" and skips.
 pub const PUBKEY_PLACEHOLDER: &str = "REPLACE_WITH_YOUR_TAURI_PUBLIC_KEY";
 
 /// Minimum gap between automatic checks. Manual checks ignore it.

@@ -358,9 +358,11 @@ install it in place. This keeps the app's "no background work" promise:
 ### Setting it up (repo owner, one time)
 
 Updates are signed, so the app will only install a build that came from
-your private key. Until that key exists, the app reports "no update
-signing key configured" instead of checking, and everything else works
-normally.
+your private key. Until that key exists nothing breaks: releases build
+without updater artifacts, and the app reports "no update signing key
+configured" instead of checking. You can ship and install perfectly well
+before setting this up — you just won't get automatic updates until you
+do.
 
 1. Generate a keypair (keep the passphrase somewhere safe):
 
@@ -369,9 +371,9 @@ normally.
    cargo tauri signer generate -w ~/.tauri/snaptrack.key
    ```
 
-2. Paste the **public** key it prints into `src-tauri/tauri.conf.json`,
-   replacing `REPLACE_WITH_YOUR_TAURI_PUBLIC_KEY` under
-   `plugins.updater.pubkey`. This one is meant to be committed.
+2. Paste the **public** key it prints into `src-tauri/tauri.conf.json` as
+   `plugins.updater.pubkey` (it ships empty). This one is meant to be
+   committed.
 
 3. Add two repository secrets (Settings → Secrets and variables →
    Actions) so CI can sign each release:

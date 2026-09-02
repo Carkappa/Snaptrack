@@ -52,6 +52,26 @@ jobs:
         with:
           workspaces: "src-tauri -> target"
 
+      # Signing updater artifacts needs the private key. Rather than failing
+      # the whole release when it isn't set up yet, the committed config ships
+      # with signing off and this turns it on only when there is a key to sign
+      # with - so a first release works before the keypair exists.
+      - name: Enable updater artifacts when a signing key is configured
+        id: updater
+        shell: bash
+        working-directory: src-tauri
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$SIGNING_KEY" ]; then
+            printf '{"bundle":{"createUpdaterArtifacts":true}}' > updater.conf.json
+            echo "args=--config updater.conf.json" >> "$GITHUB_OUTPUT"
+            echo "Signing key present - updater artifacts will be built and signed."
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "::warning::No TAURI_SIGNING_PRIVATE_KEY secret. Building installers without updater artifacts, so installed copies will not auto-update. See the README's Automatic updates section."
+          fi
+
       - name: Build and bundle (tauri-action)
         uses: tauri-apps/tauri-action@v0
         env:
@@ -73,4 +93,4 @@ jobs:
             published (a draft release is not served to the updater).
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ steps.updater.outputs.args }}
