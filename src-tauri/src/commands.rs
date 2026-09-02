@@ -1814,9 +1814,24 @@ pub async fn extract_with_chain<R: tauri::Runtime>(
 
     let mut failed = Vec::new();
     let mut errors: Vec<String> = Vec::new();
+    // A method that answered with something unreadable is kept aside. Its
+    // raw text is still worth showing if nothing else works, since it can
+    // be corrected by hand - but it must not stop the chain, because the
+    // next method may return proper fields for the same image.
+    let mut unreadable: Option<(String, LocalOcrResult)> = None;
 
     for provider in &chain {
         match run_one(&app, provider, &image_base64, &media_type).await {
+            Ok(outcome) if matches!(outcome.result, ExtractionResult::ParseFailed { .. }) => {
+                let label = crate::models::find_provider(provider)
+                    .map(|p| p.label)
+                    .unwrap_or_else(|| provider.clone());
+                errors.push(format!("{label}: answered, but not with usable fields"));
+                failed.push(provider.clone());
+                if unreadable.is_none() {
+                    unreadable = Some((provider.clone(), outcome));
+                }
+            }
             Ok(outcome) => {
                 return Ok(ChainResult {
                     outcome,
@@ -1832,6 +1847,17 @@ pub async fn extract_with_chain<R: tauri::Runtime>(
                 failed.push(provider.clone());
             }
         }
+    }
+
+    // Nothing produced fields. An unreadable answer still beats nothing:
+    // it carries the raw text into the Notes field to be fixed by hand.
+    if let Some((provider, outcome)) = unreadable {
+        let others: Vec<String> = failed.into_iter().filter(|p| p != &provider).collect();
+        return Ok(ChainResult {
+            outcome,
+            used: provider,
+            fell_back_from: others,
+        });
     }
 
     // Every method's own reason, not just the last one's. The last is

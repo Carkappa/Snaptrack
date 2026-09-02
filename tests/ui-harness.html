@@ -86,6 +86,7 @@
       fallbackChain: [],
       // Provider ids listed here fail, to exercise the fallback path.
       chainFails: [],
+      chainUnreadable: null,
       // A trimmed stand-in for models.rs's ollama_catalogue().
       ollamaCatalogue: [
         { id: "qwen2.5:3b", label: "Qwen 2.5 3B", vision: false, size: "~2 GB", accuracy: "Good", hardware: "Runs on a CPU", description: "Reads the text Tesseract found." },
@@ -310,6 +311,18 @@
         return state.fallbackChain;
       },
       extract_with_chain: ({ imageBase64, mediaType }) => {
+        // Set chainUnreadable to a provider id to have it answer with text
+        // that isn't fields, exercising the fall-through.
+        if (state.chainUnreadable === state.extractionMethod) {
+          const next = state.fallbackChain.find((p) => !state.chainFails.includes(p));
+          if (next) {
+            return {
+              ...HANDLERS.extract_with_local_ocr(),
+              used: next,
+              fell_back_from: [state.extractionMethod],
+            };
+          }
+        }
         if (state.chainFails.includes(state.extractionMethod)) {
           const used = [...state.fallbackChain].find((p) => !state.chainFails.includes(p));
           if (!used) throw new Error("Every method failed.");
