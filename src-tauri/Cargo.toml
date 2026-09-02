@@ -1,6 +1,6 @@
 [package]
 name = "job-tracker"
-version = "0.9.1"
+version = "0.10.0"
 description = "A native job-application tracker with tray icon and global hotkey capture"
 authors = ["Justin Du"]
 edition = "2021"
