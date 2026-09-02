@@ -164,14 +164,14 @@
         { id: "claude", label: "Claude (Anthropic)", needs_key: true, key_label: "Anthropic API key", key_placeholder: "sk-ant-...", key_help: "Create one at console.anthropic.com under API Keys.", default_model: "claude-sonnet-5", group: "Cloud - needs an API key", api_base: "" },
         { id: "openai", label: "ChatGPT (OpenAI)", needs_key: true, key_label: "OpenAI API key", key_placeholder: "sk-...", key_help: "Create one at platform.openai.com/api-keys.", default_model: "gpt-4o", group: "Cloud - needs an API key", api_base: "https://api.openai.com/v1" },
         { id: "tamu", label: "Texas A&M AI Chat", needs_key: true, key_label: "TAMU AI Chat API key", key_placeholder: "sk-...", key_help: "Sign in at chat.tamu.ai with your NetID, then create a key in Settings there.", default_model: "protected.gpt-4o", group: "Texas A&M - free with your NetID", api_base: "https://chat-api.tamu.ai/openai" },
-        { id: "gemini", label: "Gemini (Google)", needs_key: true, key_label: "Google AI Studio API key", key_placeholder: "AIza...", key_help: "Create one at aistudio.google.com/apikey.", default_model: "gemini-2.0-flash", group: "Cloud - needs an API key", api_base: "" },
+        { id: "gemini", label: "Gemini (Google)", needs_key: true, key_label: "Google AI Studio API key", key_placeholder: "AIza...", key_help: "Create one at aistudio.google.com/apikey.", default_model: "gemini-3.6-flash", group: "Cloud - needs an API key", api_base: "" },
       ],
       get_model: ({ provider }) => {
-        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash", ollama: "qwen2.5:3b", tamu: "protected.gpt-4o" };
+        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-3.6-flash", ollama: "qwen2.5:3b", tamu: "protected.gpt-4o" };
         return state.models[provider] || d[provider] || "";
       },
       set_model: ({ provider, model }) => {
-        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash", ollama: "qwen2.5:3b", tamu: "protected.gpt-4o" };
+        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-3.6-flash", ollama: "qwen2.5:3b", tamu: "protected.gpt-4o" };
         if (!model.trim()) delete state.models[provider];
         else state.models[provider] = model.trim();
         return state.models[provider] || d[provider] || "";

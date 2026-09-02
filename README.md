@@ -60,6 +60,9 @@ comes back empty.
 | **Claude, ChatGPT, Gemini** | API key | Most accurate. Each key stored separately in your OS keychain. |
 | **Texas A&M AI Chat** | free with a NetID | GPT, Claude and Gemini through the university. Key from [chat.tamu.ai](https://chat.tamu.ai). |
 
+If a provider retires a model, the error says so and the **Model** field on
+that method's card is where you change it.
+
 **Which to pick:** anything that understands the page beats Tesseract, which
 only reads it. A Texas A&M key is the best of both, free and accurate. Cloud
 keys next, then a local vision model if you'd rather nothing left your

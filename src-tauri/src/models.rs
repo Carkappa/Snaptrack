@@ -376,7 +376,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "Google AI Studio API key",
             "AIza...",
             "Create one at aistudio.google.com/apikey.",
-            "gemini-2.0-flash",
+            "gemini-3.6-flash",
             CLOUD,
             "",
         ),

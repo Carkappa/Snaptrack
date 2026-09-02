@@ -418,6 +418,79 @@ fn error_message(body_text: &str) -> String {
         .unwrap_or_else(|| body_text.to_string())
 }
 
+/// Number of attempts for an error the provider says is temporary.
+const TRANSIENT_ATTEMPTS: usize = 3;
+
+/// Sends a request, retrying while the provider says it is overloaded.
+///
+/// A 503 means the model is busy, not that anything is wrong with the
+/// request - Gemini in particular answers this way under load, and a single
+/// attempt turns a momentary spike into a failed capture. Waits a little
+/// longer each time rather than hammering a service that just said it is
+/// struggling.
+async fn send_with_retry(
+    request: reqwest::RequestBuilder,
+    name: &str,
+) -> Result<(reqwest::StatusCode, String), String> {
+    let mut wait_ms = 700;
+
+    for attempt in 1..=TRANSIENT_ATTEMPTS {
+        let attempt_request = request
+            .try_clone()
+            .ok_or_else(|| format!("Could not prepare the {name} request."))?;
+
+        let response = attempt_request
+            .header("content-type", "application/json")
+            .send()
+            .await
+            .map_err(|e| format!("Failed to reach the {name} API: {e}"))?;
+
+        let status = response.status();
+        let body_text = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read the {name} API response: {e}"))?;
+
+        // 429 and 503 are the provider asking for a moment. Everything
+        // else will say the same thing however many times it is asked.
+        let temporary = matches!(status.as_u16(), 429 | 503);
+        if !temporary || attempt == TRANSIENT_ATTEMPTS {
+            return Ok((status, body_text));
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+        wait_ms *= 2;
+    }
+
+    unreachable!("the loop returns on the final attempt")
+}
+
+/// Turns a provider's error into something that says what to do.
+///
+/// The raw messages are accurate and unhelpful at the moment they appear:
+/// a retired model reads as a 404, and an overloaded one as a 503 that
+/// looks like the key is wrong.
+fn describe_api_error(name: &str, status: reqwest::StatusCode, body: &str) -> String {
+    let message = error_message(body);
+    let lower = message.to_lowercase();
+
+    let hint = match status.as_u16() {
+        503 | 429 => Some(
+            "the provider is busy, not you - this was retried a few times already, so try again shortly or add a fallback method",
+        ),
+        401 | 403 => Some("check the key, or that it is the right one for this method"),
+        404 if lower.contains("model") => {
+            Some("that model no longer exists - change it in Settings under Model")
+        }
+        _ => None,
+    };
+
+    match hint {
+        Some(hint) => format!("{name} ({status}): {message} - {hint}."),
+        None => format!("{name} API error ({status}): {message}"),
+    }
+}
+
 fn provider_display_name(provider: &str) -> &str {
     match provider {
         "claude" => "Anthropic",
@@ -449,20 +522,11 @@ async fn openai_compatible(
     let url = format!("{}/chat/completions", api_base.trim_end_matches('/'));
 
     for strict in [true, false] {
-        let response = client
+        let request = client
             .post(&url)
             .header("authorization", format!("Bearer {api_key}"))
-            .header("content-type", "application/json")
-            .json(&openai_body(model, image_base64, media_type, strict))
-            .send()
-            .await
-            .map_err(|e| format!("Failed to reach the {name} API: {e}"))?;
-
-        let status = response.status();
-        let body_text = response
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read the {name} API response: {e}"))?;
+            .json(&openai_body(model, image_base64, media_type, strict));
+        let (status, body_text) = send_with_retry(request, name).await?;
 
         if status.is_success() {
             let body: serde_json::Value = serde_json::from_str(&body_text)
@@ -481,14 +545,14 @@ async fn openai_compatible(
 
         let message = error_message(&body_text);
         // Only a rejected request is worth retrying plainer. A bad key or a
-        // rate limit will say the same thing twice.
+        // busy service will say the same thing twice.
         let worth_retrying = strict
             && status.as_u16() == 400
             && ["response_format", "json_schema", "schema", "unsupported", "unrecognized"]
                 .iter()
                 .any(|hint| message.to_lowercase().contains(hint));
         if !worth_retrying {
-            return Err(format!("{name} API error ({status}): {message}"));
+            return Err(describe_api_error(name, status, &body_text));
         }
     }
 
@@ -537,23 +601,10 @@ pub async fn extract_fields_from_image(
         }
     };
 
-    let response = request
-        .header("content-type", "application/json")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to reach the {name} API: {e}"))?;
-
-    let status = response.status();
-    let body_text = response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read the {name} API response: {e}"))?;
+    let (status, body_text) = send_with_retry(request, name).await?;
 
     if !status.is_success() {
-        return Err(format!(
-            "{name} API error ({status}): {}",
-            error_message(&body_text)
-        ));
+        return Err(describe_api_error(name, status, &body_text));
     }
 
     let body: serde_json::Value = serde_json::from_str(&body_text)
@@ -937,5 +988,45 @@ mod tests {
         let short = crate::commands::first_sentence_for_test(long);
         assert!(short.len() < 90, "got {} chars: {short}", short.len());
         assert!(short.starts_with("Tesseract isn't installed"));
+    }
+
+    #[test]
+    fn a_busy_provider_is_described_as_busy_rather_than_broken() {
+        let body = r#"{"error":{"message":"This model is currently experiencing high demand."}}"#;
+        let msg = describe_api_error("Gemini", reqwest::StatusCode::SERVICE_UNAVAILABLE, body);
+        assert!(msg.contains("busy, not you"), "got: {msg}");
+        assert!(msg.contains("high demand"), "the provider's own words are kept");
+    }
+
+    #[test]
+    fn a_retired_model_says_where_to_change_it() {
+        let body = r#"{"error":{"message":"This model models/gemini-2.0-flash is no longer available."}}"#;
+        let msg = describe_api_error("Gemini", reqwest::StatusCode::NOT_FOUND, body);
+        assert!(msg.contains("Settings under Model"), "got: {msg}");
+    }
+
+    #[test]
+    fn a_bad_key_points_at_the_key() {
+        let body = r#"{"error":{"message":"API key not valid"}}"#;
+        let msg = describe_api_error("Gemini", reqwest::StatusCode::UNAUTHORIZED, body);
+        assert!(msg.contains("check the key"), "got: {msg}");
+    }
+
+    #[test]
+    fn an_ordinary_error_is_passed_through_unembellished() {
+        let body = r#"{"error":{"message":"Something specific went wrong"}}"#;
+        let msg = describe_api_error("OpenAI", reqwest::StatusCode::INTERNAL_SERVER_ERROR, body);
+        assert!(msg.contains("Something specific went wrong"));
+        assert!(!msg.contains(" - "), "no invented advice: {msg}");
+    }
+
+    #[test]
+    fn the_shipped_gemini_model_is_one_google_still_serves() {
+        // gemini-2.0-flash was shut down, and shipping a dead default meant
+        // every Gemini capture failed with a 404.
+        let model = crate::models::provider_or_default("gemini").default_model;
+        assert!(model.starts_with("gemini-"), "got {model}");
+        assert_ne!(model, "gemini-2.0-flash", "that one is retired");
+        assert_ne!(model, "gemini-1.5-flash", "so is that one");
     }
 }
