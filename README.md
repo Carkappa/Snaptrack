@@ -377,13 +377,18 @@ key is lost or exposed.
    Rust toolchain:
 
    ```bash
-   minisign -G -W -p ~/.tauri/snaptrack.key.pub -s ~/.tauri/snaptrack.key
+   minisign -G -p ~/.tauri/snaptrack.key.pub -s ~/.tauri/snaptrack.key
    ```
 
-   `-W` makes it passwordless; the key is protected by being a repository
-   secret rather than by a passphrase. On Windows, normalise the files to
-   LF line endings — minisign writes CRLF, which the parser Tauri uses does
-   not strip.
+   **Give it a password.** A passwordless (`-W`) key is not a working
+   shortcut: macOS built with one fine and Windows failed with `failed to
+   decode secret key: incorrect updater private key password`, both with
+   and without `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` set to an empty
+   string. minisign will take the password on stdin if you need this
+   scripted.
+
+   On Windows, normalise both files to LF line endings afterwards —
+   minisign writes CRLF, which the parser Tauri uses does not strip.
 
 2. Put **base64 of the whole `.pub` file** into `src-tauri/tauri.conf.json`
    as `plugins.updater.pubkey` — not the key line on its own. Tauri
