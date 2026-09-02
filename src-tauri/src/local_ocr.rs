@@ -235,6 +235,20 @@ fn looks_like_metadata(text: &str) -> bool {
     METADATA_MARKERS.iter().any(|m| lower.contains(m))
 }
 
+/// The text of a block's title lines, which is what its position field
+/// would be.
+fn title_text_of(block: &OcrLine) -> String {
+    let run = title_run(block);
+    if run.is_empty() {
+        return block.text.trim().to_string();
+    }
+    block.sub_lines[run]
+        .iter()
+        .map(|l| l.text.trim())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The run of lines within a block that are the job title itself.
 ///
 /// A block frequently holds more than the title. The company sits above it,
@@ -740,7 +754,10 @@ pub fn guess_fields(lines: &[OcrLine]) -> ExtractedFields {
         .iter()
         .enumerate()
         .filter(|(_, l)| l.text.chars().filter(|c| c.is_alphanumeric()).count() >= 3)
-        .filter(|(_, l)| !looks_like_metadata(&l.text))
+        // Judged on the lines that would become the position, not the whole
+        // block: Tesseract often merges the title with the metadata under
+        // it, and that block still holds a perfectly good title.
+        .filter(|(_, l)| !looks_like_metadata(&title_text_of(l)))
         .max_by(|(_, a), (_, b)| {
             type_size(a)
                 .partial_cmp(&type_size(b))
@@ -755,20 +772,7 @@ pub fn guess_fields(lines: &[OcrLine]) -> ExtractedFields {
     let split = title_index.and_then(|i| split_company_from_title(sorted[i]));
 
     // Only the title lines of the title block, never the whole block.
-    let position = title_index.map(|i| {
-        let block = sorted[i];
-        let run = title_run(block);
-        let text = if run.is_empty() {
-            block.text.trim().to_string()
-        } else {
-            block.sub_lines[run]
-                .iter()
-                .map(|l| l.text.trim())
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
-        strip_trailing_glyphs(text.trim())
-    });
+    let position = title_index.map(|i| strip_trailing_glyphs(title_text_of(sorted[i]).trim()));
 
     // A logo usually OCRs as its own block of one or two glyphs sitting
     // directly above the company name. That is not the company, so a
@@ -1845,5 +1849,29 @@ mod tests {
         ]);
         assert_eq!(f.location.as_deref(), Some("Mason, OH"));
         assert_eq!(f.work_type.as_deref(), Some("On-site"));
+    }
+
+    #[test]
+    fn a_block_holding_both_a_title_and_chrome_is_judged_on_the_title() {
+        // Tesseract merges these, so testing the whole block's text would
+        // throw away a perfectly good title because of the line under it.
+        let merged = OcrLine {
+            text: "whole block".into(),
+            top: 0.0,
+            height: 60.0,
+            sub_lines: vec![
+                SubLine { text: "IT Co-op - Fall 2026".into(), height: 22.0 },
+                SubLine { text: "Mason, OH - Reposted 4 months ago".into(), height: 12.0 },
+            ],
+        };
+        assert_eq!(title_text_of(&merged), "IT Co-op - Fall 2026");
+        assert!(
+            !looks_like_metadata(&title_text_of(&merged)),
+            "the title half is not chrome, even though the block contains some"
+        );
+        assert!(
+            looks_like_metadata(&merged.text.clone() + " Reposted"),
+            "and the whole-block text would have been rejected"
+        );
     }
 }
