@@ -98,7 +98,7 @@ about what a status looks like.
   from `src-tauri`.
 - **Updates were unsigned until a key existed.** `tauri.conf.json` carries a
   placeholder `pubkey`; `updates.rs` detects it and reports that plainly
-  instead of failing with a signature error. See the README for the setup.
+  instead of failing with a signature error. See DEVELOPING.md for the setup.
 - **Escape through `format.js`, never `textContent`/`innerHTML`.** That trick
   leaves quotes unescaped, which is fine between tags and an attribute
   injection inside `attr="..."`. Every value rendered here came off a

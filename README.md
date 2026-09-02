@@ -1,516 +1,113 @@
 # Job Tracker
 
-A native, installable desktop app for tracking job applications. Lives in
-the tray/menu bar; a global hotkey pops open a small capture panel so you
-can screenshot a job posting, paste it, and have the fields pulled out
-for you — reviewed and saved straight into an Excel workbook.
+Screenshot a job posting, press a shortcut, paste. The company, role,
+location and the rest get pulled out for you to check, and the row is
+saved into an Excel workbook you own.
 
-- **Tauri v2** (Rust backend + the OS's own WebView — no bundled Chromium)
-- **Vanilla HTML/CSS/JS** frontend — no React, no bundler, no `npm install`
-- No background polling, no timers, no server process. The app is inert
-  until you invoke it via the tray icon or the global hotkey.
-- Only ever one copy running. Launching it again brings the existing
-  window forward instead of starting a second tray icon.
-- **Updates itself.** One check on launch, at most once a day; a new
-  version downloads and installs on its own, waiting until you have no
-  unsaved entry open. Both the checking and the auto-install are
-  switchable in Settings.
-- Ships as a macOS `.dmg` and a Windows `.msi`/`.exe`.
+A small desktop app that lives in your system tray. Free and offline by
+default — nothing is sent anywhere unless you choose a cloud model.
 
-## How it works
+## Install
 
-1. Apply on LinkedIn (or anywhere), screenshot the page.
-2. Press `Cmd+Shift+J` (macOS) / `Ctrl+Shift+J` (Windows) from anywhere.
-3. Press `Cmd+V` / `Ctrl+V` in the capture panel.
-4. Company, position, location, work type, employment type, salary
-   range, job ID, posted date, and notes get pulled out automatically —
-   see **Extraction methods** below for how.
-5. Review/correct the fields in the form, hit Enter to save.
-6. The row is written into your `JobApplications.xlsx`.
-
-No screenshot? Click **Skip screenshot** for a blank form — the app is
-fully usable with zero API calls and zero setup.
-
-## The calendar
-
-The **Calendar** tab turns the workbook into a month grid: each day
-carries the number of applications saved with that Date Applied, shaded
-from pale to solid against the busiest day of the month on screen — so
-a productive week and a quiet one are distinguishable without reading a
-single row.
-
-- **Month** and **Year** views. The year view is a GitHub-contributions
-  style grid — one column per week, one square per day — that opens
-  scrolled to whatever is worth looking at (today, or the first day with
-  anything on it). Clicking a square drops into that month with the day
-  selected.
-- Arrows page month to month, or year to year in the year view.
-  **Today** jumps back and selects today.
-- Clicking a day lists that day's applications underneath; clicking one
-  of those opens it in the edit form, the same as clicking a row in the
-  Applications tab.
-- Above the grid: the month's total, how many days you were active,
-  your busiest day, and the current run of consecutive days with at
-  least one application out.
-- Days from the neighbouring months fill out the first and last weeks.
-  They're greyed, never shaded, and don't skew the month's colour
-  scale; clicking one pages to that month.
-
-The counts come from the Date Applied column, which is the date the
-capture was saved — so screenshots captured and saved on the day you
-applied land on the right square with no extra bookkeeping. Rows whose
-date can't be read (hand-edited to something odd, or left blank) are
-counted out and reported in a line under the grid rather than silently
-dropped.
-
-## Extraction methods
-
-Switch between these anytime in Settings — no restart needed:
-
-- **Tesseract (default, free, fully offline).** Shells out to a locally
-  installed [Tesseract](https://github.com/tesseract-ocr/tesseract)
-  binary, then guesses which recognized text block is the company vs.
-  the position vs. the location using layout heuristics (the job title
-  is almost always the single largest text on the page). The screenshot
-  is prepared first — greyscaled, **inverted if you browse in dark mode**,
-  contrast-stretched, and enlarged if the text is small — and read in
-  three page-segmentation modes, keeping whichever recognised the most.
-  That preparation is where most of the offline accuracy comes from. Meaningfully
-  less accurate than Claude — it can't actually *understand* the image,
-  just read text off it — so the full raw OCR text is always attached to
-  the Notes field for you to cross-check and fix by hand. Requires
-  Tesseract to be installed and on your `PATH`:
-  - macOS: `brew install tesseract`
-  - Windows: the [UB-Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki) (check "Add to PATH")
-  - Linux: `apt install tesseract-ocr` or your distro's equivalent
-
-  If Tesseract isn't found, Settings tells you so and you can switch to
-  Claude, or just use manual entry.
-- **A cloud model (opt-in, most accurate, needs a key).** Sends the
-  screenshot to Claude, ChatGPT or Gemini, which actually read the page
-  the way you would and return structured JSON. Pick one in Settings and
-  the key field for that provider appears; each provider's key is stored
-  separately in the OS keychain, so switching between them doesn't lose
-  the others. Choose Tesseract and no key wording is shown at all.
-
-Either way, nothing is ever invented — a field that isn't visible (or
-that the extractor isn't confident about) comes back empty for you to
-fill in, never guessed.
-
-## Installing
-
-### macOS
-
-One-liner (downloads the latest release, installs to `/Applications`,
-clears the Gatekeeper quarantine flag, and launches it):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Carkappa/Snaptrack/main/scripts/install.sh | bash
-```
-
-Or via Homebrew:
-
-```bash
-brew tap Carkappa/snaptrack https://github.com/Carkappa/Snaptrack
-brew install --cask job-tracker
-```
-
-Apple Silicon only — CI builds an `aarch64` binary. On an Intel Mac,
-build from source with `cargo tauri build`.
-
-### Windows
-
-One-liner in PowerShell (downloads the latest release installer and runs
-it silently):
+**Windows** — in PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/Carkappa/Snaptrack/main/scripts/install.ps1 | iex
 ```
 
-Or via [Scoop](https://scoop.sh):
-
-```powershell
-scoop bucket add snaptrack https://github.com/Carkappa/Snaptrack
-scoop install snaptrack/job-tracker
-```
-
-### Manual download
-
-Grab the `.dmg` (macOS) or `-setup.exe` / `.msi` (Windows) from the
-[Releases page](https://github.com/Carkappa/Snaptrack/releases). See
-[About the unsigned builds](#about-the-unsigned-builds) for the
-Gatekeeper/SmartScreen warnings you'll need to click through.
-
-## Project layout
-
-```
-src-tauri/            Rust backend (the actual application logic)
-  src/
-    lib.rs            App setup: tray icon, global shortcut, window behavior
-    commands.rs        All #[tauri::command]s exposed to the frontend (with tests)
-    extraction.rs      Anthropic API call + JSON parsing (with tests)
-    local_ocr.rs         Tesseract-backed extraction + layout heuristics (with tests)
-    excel.rs            xlsx read/write, CSV export, timestamped backups (with tests)
-    updates.rs          Update check, auto-install, progress events (with tests)
-    keychain.rs         API key storage via the keyring crate
-    models.rs            Shared data types
-  capabilities/         Tauri v2 permission grants for the main window
-  icons/                 App icons (.icns / .ico / .png)
-  tauri.conf.json         Window, bundle, and tray configuration
-scripts/set-version.sh  Bumps the version everywhere it appears, from one command
-src/                    Frontend — plain index.html + styles.css + app.js
-    calendar.js           Date math + month/year aggregation behind the Calendar tab
-    stats.js              Status breakdown, response rate, donut arcs (Applications tab)
-    format.js             HTML/attribute escaping for everything rendered
-CLAUDE.md               Repo conventions and traps, for anyone (or anything) editing it
-tests/                  Browser-run frontend tests (no npm, no runner)
-  calendar.test.html     Pure-logic tests for src/calendar.js
-  stats.test.html        Pure-logic tests for src/stats.js
-  format.test.html       Escaping tests, including the attribute-injection shapes
-  ui-harness.html        The real UI with the Tauri bridge mocked, for clicking through
-.github/workflows/      CI: Rust + frontend tests on every push, installers on a tag
-```
-
-## Prerequisites
-
-- **Rust** (stable), via [rustup](https://rustup.rs) or `brew install rust`
-- **Tauri CLI**: `cargo install tauri-cli --version "^2.0.0" --locked`
-- macOS: Xcode Command Line Tools (`xcode-select --install`)
-- Windows: the [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-  with the "Desktop development with C++" workload, and
-  [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
-  (preinstalled on Windows 11 and most Windows 10 machines)
-- **Tesseract** (optional, but it's the default extraction method — see
-  above for install commands). The app builds and runs fine without it;
-  screenshot extraction just falls back to telling you it's missing
-  until you install it or switch to Claude in Settings.
-
-There is no Node.js/npm dependency — the frontend is plain files served
-directly from `src/`, so there's no `npm install` step at all.
-
-## Running it locally
+**macOS** (Apple Silicon):
 
 ```bash
-cargo tauri dev
+curl -fsSL https://raw.githubusercontent.com/Carkappa/Snaptrack/main/scripts/install.sh | bash
 ```
 
-This launches the app with hot-reload for the Rust side and live file
-serving for the frontend. The window starts hidden in the tray on first
-run in dev mode too — use the hotkey or click the tray icon to open it.
+Or download an installer from the
+[latest release](https://github.com/Carkappa/Snaptrack/releases/latest)
+and run it.
 
-## Running the tests
+The build isn't code-signed, so **Windows SmartScreen will warn you once** —
+click *More info* → *Run anyway*. On macOS the script clears the Gatekeeper
+flag for you.
 
-```bash
-cd src-tauri
-cargo test
-```
+## First run
 
-This also runs on every push and pull request — see
-`.github/workflows/test.yml`, which additionally runs the frontend suite
-below in headless Chrome.
+The window opens by itself the first time. After that **Job Tracker lives in
+your system tray, not the taskbar** — closing the window hides it, it doesn't
+quit. Use the tray icon, or the global shortcut, to bring it back.
 
-Covers: stripping ```` ``` ```` fences from Claude's response, parsing
-(and gracefully failing to parse) extracted JSON, the Tesseract
-layout-heuristic field guesser (largest text = title, line above it =
-company, regex-based location/salary/job-ID/date detection), the Excel
-read/write round-trip, CSV export, timestamped backups and pruning,
-duplicate-key matching (case-insensitive, trimmed), and the
-once-a-day update-check throttle. A separate
-`tests/full_pipeline.rs` integration suite drives the real
-`#[tauri::command]` functions (not just internal modules) against a
-temporary workbook, including unzipping the saved `.xlsx` to confirm
-the status dropdown, fill colors, and hyperlink are really in the file.
+`Ctrl+Shift+J` (`Cmd+Shift+J` on macOS) opens it from anywhere. You can change
+that in Settings.
 
-Two tests are `#[ignore]`d because they depend on state outside the
-test itself — run them manually when you want to sanity-check the real
-OS integration:
+## Using it
 
-```bash
-# Reads whatever image is really on your clipboard right now:
-cargo test --test full_pipeline -- --ignored reads_real_clipboard_image --nocapture
+1. Apply for a job, and screenshot the posting.
+2. Press the shortcut.
+3. Press `Ctrl+V` to paste the screenshot — or drag a file in, choose one, or
+   click **Skip screenshot** to type an entry by hand.
+4. Check the fields it filled in and fix anything wrong.
+5. Press Enter to save.
 
-# Runs real Tesseract extraction against a screenshot file and prints what it guessed:
-OCR_TEST_IMAGE=/path/to/screenshot.png \
-  cargo test --test full_pipeline -- --ignored extracts_from_a_real_screenshot --nocapture
-```
+The row is written to `Documents\JobApplications.xlsx`. It's a normal
+spreadsheet — open it, sort it, edit it, back it up. The app reads it fresh
+every time, so your changes are respected.
 
-### Frontend tests
+## Reading screenshots
 
-The frontend has no build step and no npm dependencies, so its tests are
-two HTML files you open in a browser. Serve the repo root and visit them:
+Three ways, switchable in Settings at any time:
 
-```bash
-python3 -m http.server 8000
-```
+**Tesseract** — the default. Free, runs entirely on your machine, nothing
+leaves it. Less accurate than a model, so the full recognised text is always
+attached to the Notes field for you to check. Needs
+[Tesseract installed](https://github.com/UB-Mannheim/tesseract/wiki) — on
+Windows, tick **Add to PATH** during setup.
 
-- <http://localhost:8000/tests/calendar.test.html> — the calendar's date
-  math and aggregation: date parsing (including hand-edited and invalid
-  values), leap years, the 6x7 month grid and the 53-week year grid with
-  their padding, heat-level scaling, per-month and per-year totals,
-  streaks across month boundaries, and year wrapping. The page title reads
-  `PASS n/n` or `FAIL n/n`, with a per-test list.
-- <http://localhost:8000/tests/stats.test.html> — the status breakdown,
-  the response rate (silence vs. a reply, with withdrawn applications
-  excluded from both sides), and the donut geometry.
-  Both of the above **run in CI** in headless Chrome, so a red result
-  fails the build.
-- <http://localhost:8000/tests/ui-harness.html> — the real `index.html`
-  and `app.js`, with `window.__TAURI__` replaced by a mock that serves
-  fixture rows. Every tab, the capture form, the save flow, and the
-  calendar are clickable without building or launching the app.
+**Claude, ChatGPT or Gemini** — meaningfully more accurate, because they read
+the page the way you would. Pick one in Settings and paste in an API key for
+it; each provider's key is stored separately in your OS keychain. There's also
+a Model field if a provider retires the default.
 
-## Building the installers
+Either way, nothing is invented: a field that isn't visible in the screenshot
+comes back empty for you to fill in.
 
-```bash
-cargo tauri build
-```
+You can also use neither and type entries by hand.
 
-Run this **on the target OS** — a macOS `.dmg` can only be built on
-macOS, and a Windows `.msi`/`.exe` only on Windows (Tauri doesn't cross-
-compile the platform installer, even though the Rust code itself is
-portable). Output lands in `src-tauri/target/release/bundle/`:
+## What else it does
 
-- macOS: `dmg/Job Tracker_<version>_aarch64.dmg` (or `x64` on Intel Macs)
-- Windows: `msi/Job Tracker_<version>_x64_en-US.msi` and
-  `nsis/Job Tracker_<version>_x64-setup.exe`
+- **Calendar** — a month grid shaded by how many applications went out each
+  day, plus a year view. Click a day to see what you sent.
+- **Overview** — where every application stands, your response rate, and how
+  many are still waiting. Click a status to filter the list to it.
+- **Edit, delete, undo** — click a row to edit it, `×` to delete it, and Undo
+  in the toast to put it back. Your workbook is backed up before every write.
+- **Open screenshot** — the capture a row came from is archived, and openable
+  from the edit form, which helps once the listing is taken down.
+- **Search** across company, role, location, job ID and notes.
+- **Import** another `.xlsx`, skipping anything you already track.
+- **Custom statuses** — rename, add or remove them in Settings.
+- **CSV export**, one click.
 
-### First-run setup
+## Updates
 
-On first launch (or whenever no API key is stored), the app shows a
-setup screen asking for your Anthropic API key. It's stored in the OS
-keychain (Keychain Access on macOS, Credential Manager on Windows) via
-the `keyring` crate — never written to a plaintext file or read from an
-environment variable. You can skip this screen entirely and use the app
-in manual-entry mode; add the key later from Settings if you change your
-mind.
+New versions install themselves. The app checks once when it starts, at most
+once a day, and waits until you have no unsaved entry open before restarting.
+Both the check and the automatic install can be switched off in Settings, and
+**Check now** is there when you want it.
 
-By default, the workbook is created at `~/Documents/JobApplications.xlsx`.
-Change the path from the Settings tab at any time.
+## If something's wrong
 
-## Beyond the basics
+**"Tesseract not found"** — install it and make sure it's on your `PATH`, or
+switch to a cloud model, or just type entries by hand.
 
-- **Edit any saved row.** Click a row in the Applications tab (anywhere
-  but the Status dropdown) to reopen it in the full edit form.
-- **Delete a row.** Hover a row and click the &times; on the right. It
-  asks first, and the workbook is backed up before the rewrite, so a
-  mistake is recoverable from `backups/`. Deleting checks that the row is
-  still the one you were looking at, in case the workbook changed in Excel
-  while the app had it listed.
-- **Sort the list.** Click Date, Company, Position, or Status to sort by
-  it; click again to reverse. Newest-first by default, since the workbook
-  itself is append-ordered. Sorting is display-only — it never reorders
-  the rows in the file.
-- **Overview panel.** Above the list: a donut of where every application
-  stands, your response rate, and a breakdown of each status with a bar
-  and a share. Collapsible — click the heading — and it remembers.
-  **Click a status** in it to narrow the list to those applications.
-- **Search across the row.** Company, role, location, job ID, and notes —
-  which with Tesseract holds the whole raw OCR text of the posting.
-- **Undo a delete.** The toast after a delete puts the row back exactly
-  where it was, with every field.
-- **Import another workbook.** Settings → Import merges a second `.xlsx`
-  in. Anything whose company and role you already track is skipped, and
-  the file you import from is never modified.
-- **Edit the status list.** Settings → Statuses. Rename, add, remove, and
-  say what each one means: an answer of any kind ("They replied"), still
-  waiting, or closed by you — which is what keeps the response rate
-  honest once you invent your own. Removing a status leaves applications
-  already using it untouched.
-- **CSV export.** One click in the Applications tab writes a sibling
-  `JobApplications.csv` next to the workbook.
-- **Openable links.** The `link` cell in the Applications table opens the
-  posting in your real browser. Only `http`/`https` are accepted — a row's
-  URL came off a screenshot or a spreadsheet cell, not from this app, so
-  the scheme is checked rather than trusted.
-- **Automatic backups.** Every save copies the previous workbook into a
-  `backups/` folder next to it first (timestamped, capped at the last
-  10), so a bad edit never loses prior data.
-- **Screenshot archive.** When a save came from a screenshot, a copy is
-  kept in `JobApplications_screenshots/` next to the workbook, named by
-  date/company/position. Open a row for editing and, if a capture was
-  archived for it, **Open screenshot** opens it in your image viewer —
-  useful once the listing has been taken down.
-- **Pick the model.** Each cloud provider's card has a Model field,
-  defaulting to a current model. If a provider retires one, change it
-  there rather than waiting for a new release; blank goes back to the
-  default.
-- **Status counts.** A small `12 Applied · 3 Interviewing · ...` line
-  above the Applications list, computed from what's already loaded.
-- **Calendar.** A month grid shading each day by how many applications
-  went out that day, so a slow week is visible at a glance. See below.
-- **Automatic updates.** A newer release installs itself and restarts
-  into the new version, with a progress bar and an off switch. See
-  below.
+**Extraction got it wrong** — that happens some of the time; fix the fields
+before saving. Tesseract does noticeably better on a light-mode screenshot at
+a readable size. A cloud model does better still.
 
-## Automatic updates
+**"It's open in Excel"** — close the workbook and click Retry. The app never
+writes over a file another program has locked.
 
-Installed copies check GitHub Releases for a newer version and offer to
-install it in place. This keeps the app's "no background work" promise:
+**Can't find the window** — look in the system tray, or press the shortcut.
 
-- **One check per launch, at most one a day.** No timer, no polling.
-  The check is a single HTTPS request made when the window initialises,
-  and it's skipped entirely if one already went out in the last 24
-  hours.
-- **It installs itself.** By default a found update downloads, verifies
-  its signature, installs, and restarts into the new version without
-  being asked. A banner above the tabs shows the version and a download
-  progress bar throughout, so it's never silent.
-- **It never restarts over your work.** If the capture form has an
-  unsaved entry in it, the install holds off and the banner offers
-  **Install & restart** instead. It goes ahead on its own the moment you
-  save that entry.
-- **Two off switches.** Settings → Updates has "Check for a new version
-  on launch" and "Install updates automatically, without asking".
-  Unchecking the second gives you the ask-first banner; unchecking the
-  first stops the automatic check altogether. **Check now** works either
-  way, and ignores both the once-a-day throttle and the checking
-  preference — you asked for that one explicitly.
-- **Failures are inert.** Offline, endpoint down, or updates not
-  configured — the check fails quietly and the app carries on. A failed
-  *install* puts the banner back into its actionable state and surfaces
-  the same retry toast as a failed save.
+---
 
-### Regenerating the keypair (only if it is lost or compromised)
-
-Updates are signed, so the app will only install a build that came from
-the project's private key. **This is configured** — the public key is in
-`tauri.conf.json` and CI holds the private half as a repository secret.
-
-A fork won't have those secrets, and nothing breaks there: releases build
-without updater artifacts and the app reports "no update signing key
-configured" instead of failing.
-
-Replacing the key means every installed copy stops accepting updates —
-they verify against the public key baked into the build they are running —
-so those users have to reinstall by hand once. Only do this if the private
-key is lost or exposed.
-
-1. Generate a keypair. Either the Tauri CLI, or minisign, which needs no
-   Rust toolchain:
-
-   ```bash
-   minisign -G -p ~/.tauri/snaptrack.key.pub -s ~/.tauri/snaptrack.key
-   ```
-
-   **Give it a password.** A passwordless (`-W`) key is not a working
-   shortcut: macOS built with one fine and Windows failed with `failed to
-   decode secret key: incorrect updater private key password`, both with
-   and without `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` set to an empty
-   string. minisign will take the password on stdin if you need this
-   scripted.
-
-   On Windows, normalise both files to LF line endings afterwards —
-   minisign writes CRLF, which the parser Tauri uses does not strip.
-
-2. Put **base64 of the whole `.pub` file** into `src-tauri/tauri.conf.json`
-   as `plugins.updater.pubkey` — not the key line on its own. Tauri
-   base64-decodes that value and hands the result to minisign's parser,
-   which wants the full two-line file. This one is meant to be committed.
-
-3. Add two repository secrets (Settings → Secrets and variables →
-   Actions) so CI can sign each release:
-
-   | Secret | Value |
-   | --- | --- |
-   | `TAURI_SIGNING_PRIVATE_KEY` | **base64 of** `~/.tauri/snaptrack.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | only for a passworded key — see below |
-
-   With a passwordless (`-W`) key, leave that second secret **unset and
-   absent from the workflow's `env:`**. An empty value is not the same as
-   no value: macOS accepted it and Windows failed the build with "Wrong
-   password for that key".
-
-   ```bash
-   base64 -w0 ~/.tauri/snaptrack.key | gh secret set TAURI_SIGNING_PRIVATE_KEY
-   ```
-
-   Never commit the private key itself, and keep a backup of it somewhere
-   safe — losing it is what forces every user to reinstall.
-
-4. Tag and push a release as usual. The workflow bundles the installers,
-   signs them, and attaches a `latest.json` manifest — which is what the
-   endpoint in `tauri.conf.json` points at:
-
-   ```
-   https://github.com/Carkappa/Snaptrack/releases/latest/download/latest.json
-   ```
-
-**Tagging is the whole process.** The workflow builds the installers,
-attaches them, and publishes the release. Don't create a release from the
-tag page yourself - that makes a second, empty release on the same tag and
-leaves the built installers behind.
-
-### Bumping the version
-
-`src-tauri/Cargo.toml` is the source of truth — `tauri.conf.json` has no
-`version` field at all and inherits it. The two package manifests have to
-carry a literal copy, so one script keeps all three in step:
-
-```bash
-./scripts/set-version.sh 0.2.0
-```
-
-An installer whose version isn't newer than what's installed is simply
-never offered as an update, and nothing about that failure is visible, so
-the release workflow also refuses to build when the tag and the crate
-version disagree.
-
-## CI: building both installers automatically
-
-`.github/workflows/release.yml` builds both installers on a
-`macos-latest` + `windows-latest` matrix using
-[`tauri-apps/tauri-action`](https://github.com/tauri-apps/tauri-action).
-It fires on any pushed tag matching `v*` (or manually via "Run workflow"),
-and drafts a GitHub Release with both artifacts attached. It needs no
-GitHub Container Registry or repo secrets beyond the default
-`GITHUB_TOKEN`.
-
-To cut a release:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-## About the unsigned builds
-
-These builds are **not code-signed or notarized** — that requires a
-paid Apple Developer account and a Windows code-signing certificate,
-neither of which this project provisions. That means:
-
-**macOS (Gatekeeper):** double-clicking the `.dmg`'s app the first time
-shows *"Job Tracker" can't be opened because Apple cannot check it for
-malicious software* (or, on older macOS, *"is damaged and can't be
-opened"* — same root cause, just a more alarming wording). To open it
-anyway: right-click (or Control-click) the app → **Open** → **Open** in
-the confirmation dialog. You only need to do this once. Alternatively,
-after copying the app to `/Applications`, run:
-
-```bash
-xattr -cr "/Applications/Job Tracker.app"
-```
-
-**Windows (SmartScreen):** running the installer shows *"Windows
-protected your PC" / "Microsoft Defender SmartScreen prevented an
-unrecognized app from starting."* Click **More info**, then **Run
-anyway**.
-
-Neither warning means the app is unsafe — it's the standard OS response
-to any installer that isn't signed with a paid certificate. If you want
-to remove these warnings for your own distribution, you'll need an Apple
-Developer Program membership (for `codesign`/`notarytool`) and a Windows
-Authenticode certificate, then wire the relevant secrets into
-`tauri.conf.json`'s `bundle.macOS`/`bundle.windows` signing fields and
-the CI workflow's environment.
-
-## Design notes / deviations
-
-- The window is resizable (default 480×600, `minWidth`/`minHeight` also
-  480×600) rather than fixed-size, so the Applications list is usable
-  without paste-panel content getting clipped. It still opens at the
-  spec'd 480×600 quick-capture size every time.
-- Closing the window (⌘W / the titlebar close button) hides it instead
-  of quitting — the app keeps running via the tray icon until you choose
-  **Quit** from the tray menu.
-- The list view re-reads the workbook only when you open the
-  Applications tab — there's no polling or file-watching.
+Building it, running the tests, and cutting a release are in
+[DEVELOPING.md](DEVELOPING.md).

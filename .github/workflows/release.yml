@@ -70,7 +70,7 @@ jobs:
             echo "Signing key present - updater artifacts will be built and signed."
           else
             echo "args=" >> "$GITHUB_OUTPUT"
-            echo "::warning::No TAURI_SIGNING_PRIVATE_KEY secret. Building installers without updater artifacts, so installed copies will not auto-update. See the README's Automatic updates section."
+            echo "::warning::No TAURI_SIGNING_PRIVATE_KEY secret. Building installers without updater artifacts, so installed copies will not auto-update. See DEVELOPING.md, Automatic updates."
           fi
 
       - name: Build and bundle (tauri-action)
@@ -79,8 +79,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signs the updater artifacts and the latest.json manifest the
           # installed app polls. Without these two secrets the build still
-          # succeeds, but it produces no update manifest - see the README's
-          # "Automatic updates" section for generating the keypair.
+          # succeeds, but it produces no update manifest - see DEVELOPING.md,
+          # "Automatic updates", for generating the keypair.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           # The key is password-protected. A passwordless (-W) key is not
           # a working alternative here: macOS accepted one and Windows
