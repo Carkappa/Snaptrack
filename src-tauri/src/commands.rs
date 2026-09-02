@@ -593,40 +593,10 @@ pub async fn list_provider_models(provider: String) -> Vec<String> {
     let Some(p) = crate::models::find_provider(&provider) else {
         return Vec::new();
     };
-    if p.api_base.is_empty() {
-        return Vec::new();
-    }
     let Ok(key) = keychain::get_api_key(&p.id) else {
         return Vec::new();
     };
-
-    let url = format!("{}/models", p.api_base.trim_end_matches('/'));
-    let Ok(response) = reqwest::Client::new()
-        .get(&url)
-        .header("authorization", format!("Bearer {key}"))
-        .send()
-        .await
-    else {
-        return Vec::new();
-    };
-    if !response.status().is_success() {
-        return Vec::new();
-    }
-
-    let mut names: Vec<String> = response
-        .json::<serde_json::Value>()
-        .await
-        .ok()
-        .and_then(|v| v.get("data").cloned())
-        .and_then(|d| d.as_array().cloned())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    names.sort();
-    names
+    extraction::list_models(&p.id, &key, &p.api_base).await
 }
 
 /// Chooses a model for a provider when the configured one is not among
@@ -702,42 +672,12 @@ pub async fn test_api_key(provider: String) -> Result<String, String> {
     let key = keychain::get_api_key(&p.id)
         .map_err(|_| format!("No key stored for {} yet.", p.label))?;
 
-    if p.api_base.is_empty() {
-        // Anthropic and Gemini have no shared listing endpoint; the only
-        // honest check is a real request, which capture already does.
-        return Ok(format!(
-            "A key is stored for {}. It is checked when you next capture.",
+    let names = extraction::list_models(&p.id, &key, &p.api_base).await;
+    if names.is_empty() {
+        return Err(format!(
+            "{} did not accept the key, or returned no usable models.",
             p.label
         ));
-    }
-
-    let url = format!("{}/models", p.api_base.trim_end_matches('/'));
-    let response = reqwest::Client::new()
-        .get(&url)
-        .header("authorization", format!("Bearer {key}"))
-        .send()
-        .await
-        .map_err(|e| format!("Couldn't reach {}: {e}", p.label))?;
-
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!("{} rejected the key ({status}).", p.label));
-    }
-
-    let names: Vec<String> = serde_json::from_str::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|v| v.get("data").cloned())
-        .and_then(|d| d.as_array().cloned())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    if names.is_empty() {
-        return Ok(format!("Key works - {} accepted it.", p.label));
     }
     Ok(format!(
         "Key works. {} models available, including: {}.",

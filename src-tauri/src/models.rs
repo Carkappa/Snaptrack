@@ -253,6 +253,10 @@ pub fn best_cloud_model(available: &[String]) -> Option<String> {
         return None;
     }
 
+    // A dated snapshot is the same model as its alias, and the alias keeps
+    // working when the snapshot is retired - so prefer the plain name.
+    let undated = |m: &str| !m.chars().rev().take(8).all(|c| c.is_ascii_digit() || c == '-');
+
     for family in CLOUD_MODEL_RANK {
         // Prefer the highest version within a family, which sorts last:
         // "Claude Sonnet 4.6" beats "Claude Sonnet 4.1".
@@ -260,10 +264,16 @@ pub fn best_cloud_model(available: &[String]) -> Option<String> {
             .iter()
             .filter(|m| m.to_lowercase().contains(family))
             .collect();
-        matches.sort();
-        if let Some(best) = matches.last() {
-            return Some((**best).clone());
+        if matches.is_empty() {
+            continue;
         }
+        matches.sort();
+        // Prefer an undated alias within the family; fall back to the
+        // newest dated snapshot when that is all there is.
+        if let Some(alias) = matches.iter().rev().find(|m| undated(m)) {
+            return Some((***alias).clone());
+        }
+        return Some((**matches.last().expect("checked non-empty")).clone());
     }
     Some(usable[0].clone())
 }
@@ -319,6 +329,29 @@ mod cloud_model_tests {
             best_cloud_model(&list(&["text-embedding-3-large", "whisper-1"])),
             None,
             "nothing usable means keep whatever was configured"
+        );
+    }
+
+    #[test]
+    fn an_alias_is_preferred_over_a_dated_snapshot() {
+        // "claude-sonnet-5" keeps working when "claude-sonnet-5-20260101"
+        // is retired, so pinning to the snapshot is how a default goes
+        // stale in the first place.
+        let got = best_cloud_model(&list(&[
+            "claude-sonnet-5-20260101",
+            "claude-sonnet-5",
+            "claude-opus-5",
+        ]));
+        assert_eq!(got.as_deref(), Some("claude-sonnet-5"));
+    }
+
+    #[test]
+    fn a_dated_snapshot_is_used_when_there_is_no_alias() {
+        let got = best_cloud_model(&list(&["claude-sonnet-5-20260101", "claude-sonnet-5-20260315"]));
+        assert_eq!(
+            got.as_deref(),
+            Some("claude-sonnet-5-20260315"),
+            "the newest snapshot when no alias exists"
         );
     }
 

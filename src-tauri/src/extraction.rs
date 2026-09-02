@@ -494,6 +494,92 @@ async fn send_with_retry(
     unreachable!("the loop returns on the final attempt")
 }
 
+/// Asks a provider which models a key can reach.
+///
+/// Every provider has a listing endpoint and every one shapes it
+/// differently. Worth the per-provider code: without it a retired model is
+/// a 404 at the moment of capture that reads like a broken key, which is
+/// exactly what shipping a dead Gemini default did.
+///
+/// Returns an empty list on any failure - the caller then keeps whatever
+/// was configured, which is the behaviour from before.
+pub async fn list_models(provider: &str, api_key: &str, api_base: &str) -> Vec<String> {
+    let client = reqwest::Client::new();
+    let request = match provider {
+        "openai" | "tamu" => client
+            .get(format!("{}/models", api_base.trim_end_matches('/')))
+            .header("authorization", format!("Bearer {api_key}")),
+        "claude" => client
+            .get("https://api.anthropic.com/v1/models?limit=100")
+            .header("x-api-key", api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION),
+        "gemini" => client
+            .get("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200")
+            .header("x-goog-api-key", api_key),
+        _ => return Vec::new(),
+    };
+
+    let Ok(response) = request.send().await else {
+        return Vec::new();
+    };
+    if !response.status().is_success() {
+        return Vec::new();
+    }
+    let Ok(body) = response.json::<serde_json::Value>().await else {
+        return Vec::new();
+    };
+
+    let mut names = match provider {
+        // Gemini lists under "models", names them "models/gemini-3.6-flash",
+        // and includes embedding models that cannot answer a prompt.
+        "gemini" => body
+            .get("models")
+            .and_then(|m| m.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter(|m| {
+                        m.get("supportedGenerationMethods")
+                            .and_then(|s| s.as_array())
+                            .map(|methods| methods.iter().any(|x| x.as_str() == Some("generateContent")))
+                            .unwrap_or(true)
+                    })
+                    .filter_map(|m| m.get("name").and_then(|n| n.as_str()))
+                    .map(|n| n.trim_start_matches("models/").to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        // Anthropic and the OpenAI-compatible ones both use data[].id.
+        // Anthropic also says which models accept an image, which is the
+        // thing that actually matters here.
+        "claude" => body
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter(|m| {
+                        m.pointer("/capabilities/image_input/supported")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true)
+                    })
+                    .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        _ => body
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    };
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// Turns a provider's error into something that says what to do.
 ///
 /// The raw messages are accurate and unhelpful at the moment they appear:
