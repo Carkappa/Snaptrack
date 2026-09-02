@@ -69,6 +69,14 @@
           </div>
         </div>
 
+        <div id="ocr-blocks-panel" class="ocr-blocks-panel" hidden>
+          <p class="ocr-blocks-hint">
+            Wrong field? Click a box below to drop that text into
+            <strong id="ocr-target-label">the focused field</strong>.
+          </p>
+          <div id="ocr-blocks" class="ocr-blocks"></div>
+        </div>
+
         <div id="parse-failed" class="parse-failed" hidden>
           <p><strong>Couldn't parse Claude's response as JSON.</strong> Raw text below - fix the fields by hand.</p>
           <textarea id="parse-failed-raw" readonly rows="4"></textarea>

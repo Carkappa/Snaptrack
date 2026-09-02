@@ -241,6 +241,101 @@ const COMPANY_SUFFIXES: [&str; 10] = [
     "co", "inc", "llc", "ltd", "plc", "ag", "sa", "bv", "nv", "gmbh",
 ];
 
+/// Which block on the page held each field, learned from what the user
+/// actually saved. Keyed by field name, valued by index into the block
+/// list, top to bottom.
+pub type FieldHints = std::collections::HashMap<String, usize>;
+
+/// Fields worth learning a position for.
+///
+/// Only fields whose value is the text of a block. Work type and
+/// employment type are matched by keyword inside a block ("On-site" out of
+/// "On-site Full-time"), so a block index would fill them with the whole
+/// chip row.
+pub const LEARNABLE_FIELDS: [&str; 3] = ["company", "position", "location"];
+
+/// Works out which block each saved value came from.
+///
+/// Called with what the user actually kept, so it records where the right
+/// answer was rather than where the heuristics guessed. A field the user
+/// typed from scratch matches no block and is simply not learned - better
+/// to keep guessing than to learn something false.
+pub fn learn_hints(blocks: &[String], saved: &[(String, String)]) -> FieldHints {
+    let mut hints = FieldHints::new();
+    for (field, value) in saved {
+        if !LEARNABLE_FIELDS.contains(&field.as_str()) {
+            continue;
+        }
+        let needle = value.trim().to_lowercase();
+        if needle.is_empty() {
+            continue;
+        }
+        if let Some(idx) = blocks.iter().position(|b| {
+            let hay = b.trim().to_lowercase();
+            hay == needle || hay.contains(&needle) || needle.contains(&hay)
+        }) {
+            hints.insert(field.clone(), idx);
+        }
+    }
+    hints
+}
+
+/// Overrides guessed fields with what was learned for this board.
+///
+/// A hint wins over the heuristic because it came from the user correcting
+/// this exact layout. A hint pointing past the end of a shorter capture is
+/// ignored rather than dropping the field.
+pub fn apply_hints(fields: &mut ExtractedFields, blocks: &[String], hints: &FieldHints) {
+    for (field, idx) in hints {
+        let Some(block) = blocks.get(*idx) else { continue };
+        let block = block.trim();
+        if block.is_empty() {
+            continue;
+        }
+        match field.as_str() {
+            "company" => fields.company = Some(strip_edge_noise(block)),
+            "position" => fields.position = Some(strip_trailing_glyphs(block)),
+            // The block is the right row; the regex still picks the place
+            // name out of "Westboro, WI - 5 days ago - 42 people clicked".
+            "location" => {
+                let value = location_re()
+                    .find(block)
+                    .map(|m| m.as_str().trim().to_string())
+                    .unwrap_or_else(|| block.to_string());
+                fields.location = Some(strip_edge_noise(&value));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Job boards this build recognises, by text that only appears on them.
+///
+/// Used to key what the app learns from corrections: a rule about where
+/// the company sits on LinkedIn must not be applied to a Greenhouse page.
+const SITE_MARKERS: [(&str, &str); 7] = [
+    ("linkedin", "linkedin"),
+    ("people clicked apply", "linkedin"),
+    ("promoted by hirer", "linkedin"),
+    ("greenhouse", "greenhouse"),
+    ("jobs.lever.co", "lever"),
+    ("myworkdayjobs", "workday"),
+    ("indeed", "indeed"),
+];
+
+/// Which board a capture came from, or None when nothing identifies it.
+///
+/// Deliberately conservative: mistaking one board for another would apply
+/// the wrong learned layout, which is worse than falling back to the
+/// generic heuristics.
+pub fn detect_site(text: &str) -> Option<&'static str> {
+    let lower = text.to_lowercase();
+    SITE_MARKERS
+        .iter()
+        .find(|(marker, _)| lower.contains(marker))
+        .map(|(_, site)| *site)
+}
+
 /// Drops trailing tokens carrying no letters or digits.
 ///
 /// The verified-employer badge beside a job title comes back as a stray
@@ -1343,5 +1438,137 @@ mod tests {
             split_apart.len() > together.len(),
             "and the tie-break is block count, fewest wins"
         );
+    }
+
+    // ---- site detection ----
+
+    #[test]
+    fn a_linkedin_card_is_recognised_by_more_than_its_name() {
+        assert_eq!(detect_site("42 people clicked apply"), Some("linkedin"));
+        assert_eq!(detect_site("Promoted by hirer"), Some("linkedin"));
+        assert_eq!(detect_site("Sign in to LinkedIn"), Some("linkedin"));
+    }
+
+    #[test]
+    fn other_boards_are_told_apart() {
+        assert_eq!(detect_site("Powered by Greenhouse"), Some("greenhouse"));
+        assert_eq!(detect_site("jobs.lever.co/acme/123"), Some("lever"));
+        assert_eq!(detect_site("acme.myworkdayjobs.com"), Some("workday"));
+        assert_eq!(detect_site("Indeed.com"), Some("indeed"));
+    }
+
+    #[test]
+    fn an_unrecognised_page_is_not_guessed_at() {
+        // Applying one board's learned layout to another is worse than
+        // falling back to the generic heuristics.
+        assert_eq!(detect_site("Acme Careers - Senior Engineer"), None);
+        assert_eq!(detect_site(""), None);
+    }
+
+    // ---- learning from what was saved ----
+
+    fn blocks() -> Vec<String> {
+        vec![
+            "| a Amazon".to_string(),
+            "Robotics - Software Development Engineer".to_string(),
+            "Westboro, WI - 5 days ago - 42 people clicked apply".to_string(),
+            "On-site Full-time".to_string(),
+        ]
+    }
+
+    fn saved(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(f, v)| (f.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn a_correction_records_where_the_right_answer_was() {
+        let hints = learn_hints(
+            &blocks(),
+            &saved(&[
+                ("company", "Amazon"),
+                ("position", "Robotics - Software Development Engineer"),
+                ("location", "Westboro, WI"),
+            ]),
+        );
+        assert_eq!(hints.get("company"), Some(&0), "matched inside the logo debris");
+        assert_eq!(hints.get("position"), Some(&1));
+        assert_eq!(hints.get("location"), Some(&2), "matched as part of the meta row");
+    }
+
+    #[test]
+    fn a_value_typed_from_scratch_teaches_nothing() {
+        // Better to keep guessing than to learn something false.
+        let hints = learn_hints(&blocks(), &saved(&[("company", "Some Other Company")]));
+        assert!(hints.is_empty());
+    }
+
+    #[test]
+    fn keyword_fields_are_not_learned_by_position() {
+        // "On-site" is picked out of a chip row; a block index would fill
+        // the field with "On-site Full-time".
+        let hints = learn_hints(&blocks(), &saved(&[("work_type", "On-site")]));
+        assert!(hints.is_empty());
+        assert!(!LEARNABLE_FIELDS.contains(&"work_type"));
+    }
+
+    #[test]
+    fn blank_values_are_ignored() {
+        let hints = learn_hints(&blocks(), &saved(&[("company", "   "), ("position", "")]));
+        assert!(hints.is_empty());
+    }
+
+    // ---- applying what was learned ----
+
+    #[test]
+    fn a_hint_overrides_the_heuristic_and_is_cleaned_up() {
+        let mut fields = ExtractedFields {
+            company: Some("Wrong".into()),
+            position: Some("Also wrong".into()),
+            ..Default::default()
+        };
+        let mut hints = FieldHints::new();
+        hints.insert("company".into(), 0);
+        hints.insert("position".into(), 1);
+        hints.insert("location".into(), 2);
+        apply_hints(&mut fields, &blocks(), &hints);
+
+        assert_eq!(fields.company.as_deref(), Some("Amazon"), "logo debris stripped");
+        assert_eq!(
+            fields.position.as_deref(),
+            Some("Robotics - Software Development Engineer")
+        );
+        assert_eq!(
+            fields.location.as_deref(),
+            Some("Westboro, WI"),
+            "the hint picks the row, the regex still picks the place out of it"
+        );
+    }
+
+    #[test]
+    fn a_hint_past_the_end_of_a_shorter_capture_is_ignored() {
+        let mut fields = ExtractedFields {
+            company: Some("Guessed".into()),
+            ..Default::default()
+        };
+        let mut hints = FieldHints::new();
+        hints.insert("company".into(), 99);
+        apply_hints(&mut fields, &blocks(), &hints);
+        assert_eq!(
+            fields.company.as_deref(),
+            Some("Guessed"),
+            "a stale hint must not blank a field"
+        );
+    }
+
+    #[test]
+    fn learning_then_applying_round_trips() {
+        let b = blocks();
+        let hints = learn_hints(&b, &saved(&[("company", "Amazon")]));
+        let mut fields = ExtractedFields::default();
+        apply_hints(&mut fields, &b, &hints);
+        assert_eq!(fields.company.as_deref(), Some("Amazon"));
     }
 }

@@ -14,6 +14,7 @@ const HOTKEY_KEY: &str = "capture_hotkey";
 const SEEN_WELCOME_KEY: &str = "seen_welcome";
 const STATUS_DEFS_KEY: &str = "status_defs";
 const MODELS_KEY: &str = "provider_models";
+const OCR_HINTS_KEY: &str = "ocr_field_hints";
 const UPDATE_CHECK_ENABLED_KEY: &str = "update_check_enabled";
 const AUTO_INSTALL_UPDATES_KEY: &str = "auto_install_updates";
 const LAST_UPDATE_CHECK_KEY: &str = "last_update_check";
@@ -234,22 +235,112 @@ pub fn local_ocr_available() -> bool {
 /// this is meaningfully less reliable than Claude's actual
 /// understanding of the image.
 #[tauri::command]
-pub fn extract_with_local_ocr(image_base64: String) -> Result<ExtractionResult, String> {
+pub fn extract_with_local_ocr<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    image_base64: String,
+) -> Result<LocalOcrResult, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(image_base64)
         .map_err(|e| format!("Invalid image data: {e}"))?;
 
     let lines = crate::local_ocr::run_ocr(&bytes)?;
     if lines.is_empty() {
-        return Ok(ExtractionResult::ParseFailed {
-            raw_text: String::new(),
-            error: "No text was detected in the image.".to_string(),
+        return Ok(LocalOcrResult {
+            result: ExtractionResult::ParseFailed {
+                raw_text: String::new(),
+                error: "No text was detected in the image.".to_string(),
+            },
+            blocks: Vec::new(),
+            site: None,
         });
     }
 
-    Ok(ExtractionResult::Parsed {
-        fields: crate::local_ocr::guess_fields(&lines),
+    let blocks: Vec<String> = lines.iter().map(|l| l.text.trim().to_string()).collect();
+    let mut fields = crate::local_ocr::guess_fields(&lines);
+
+    // What the user corrected last time on this board beats the layout
+    // heuristics, which have no way of knowing this page is unusual.
+    let site = crate::local_ocr::detect_site(&blocks.join("
+"));
+    if let Some(site) = site {
+        let hints = read_hints(&app, site);
+        crate::local_ocr::apply_hints(&mut fields, &blocks, &hints);
+    }
+
+    Ok(LocalOcrResult {
+        result: ExtractionResult::Parsed { fields },
+        blocks,
+        site: site.map(str::to_string),
     })
+}
+
+/// The OCR blocks travel to the frontend alongside the guessed fields:
+/// they are what the click-to-fill list is built from, and what a later
+/// correction is matched against.
+#[derive(serde::Serialize)]
+pub struct LocalOcrResult {
+    #[serde(flatten)]
+    pub result: ExtractionResult,
+    pub blocks: Vec<String>,
+    pub site: Option<String>,
+}
+
+fn read_hints<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    site: &str,
+) -> crate::local_ocr::FieldHints {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(OCR_HINTS_KEY))
+        .and_then(|v| v.get(site).cloned())
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
+}
+
+/// Records where the values the user kept actually sat on the page.
+///
+/// Called after a successful save, with the fields as saved rather than as
+/// guessed, so a correction teaches the next capture from the same board.
+/// Best-effort: never fails a save.
+#[tauri::command]
+pub fn learn_ocr_hints<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    site: String,
+    blocks: Vec<String>,
+    saved: Vec<(String, String)>,
+) -> Result<(), String> {
+    if site.is_empty() || blocks.is_empty() {
+        return Ok(());
+    }
+    let learned = crate::local_ocr::learn_hints(&blocks, &saved);
+    if learned.is_empty() {
+        return Ok(());
+    }
+
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    let mut all = store
+        .get(OCR_HINTS_KEY)
+        .and_then(|v| {
+            serde_json::from_value::<
+                std::collections::HashMap<String, crate::local_ocr::FieldHints>,
+            >(v)
+            .ok()
+        })
+        .unwrap_or_default();
+
+    // Merge rather than replace: a capture that only pinned down the
+    // company should not forget where the title was.
+    all.entry(site).or_default().extend(learned);
+
+    store.set(
+        OCR_HINTS_KEY,
+        serde_json::to_value(&all).map_err(|e| e.to_string())?,
+    );
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))
 }
 
 #[tauri::command]

@@ -24,6 +24,9 @@
     thumbnailWrap: el("thumbnail-wrap"),
     thumbnail: el("thumbnail"),
     thumbnailStatus: el("thumbnail-status"),
+    ocrBlocksPanel: el("ocr-blocks-panel"),
+    ocrBlocks: el("ocr-blocks"),
+    ocrTargetLabel: el("ocr-target-label"),
     parseFailed: el("parse-failed"),
     parseFailedRaw: el("parse-failed-raw"),
     pasteHintKey: el("paste-hint-key"),
@@ -148,6 +151,11 @@
   let editingIndex = null; // set when editing an existing row from the list tab
   let currentImage = null; // { base64, mediaType } of the screenshot behind the current form, if any
   let currentExtractionMethod = "tesseract";
+  // The OCR text blocks behind the form, what the click-to-fill list is
+  // built from and what a correction is matched against when saving.
+  let currentOcrBlocks = [];
+  let currentOcrSite = null;
+  let lastFocusedField = null;
 
   let autoInstallUpdates = true;
   let updateInstallStarted = false; // guards against a second install kicking off
@@ -290,6 +298,9 @@
     dom.fStatus.value = "Applied";
     dom.fDateApplied.value = todayIso();
     currentImage = null;
+    currentOcrBlocks = [];
+    currentOcrSite = null;
+    renderOcrBlocks();
     exitEditMode();
   }
 
@@ -394,6 +405,10 @@
           ? await invoke("extract_with_local_ocr", { imageBase64: base64 })
           : await invoke("extract_from_image", { imageBase64: base64, mediaType });
       dom.thumbnailStatus.textContent = "Extracted - review and save below.";
+      // Only the local OCR path knows where the text sat on the page.
+      currentOcrBlocks = Array.isArray(result.blocks) ? result.blocks : [];
+      currentOcrSite = result.site || null;
+      renderOcrBlocks();
       if (result.kind === "Parsed") {
         applyExtractedFields(result.fields);
       } else {
@@ -486,6 +501,106 @@
     }
   });
 
+  // ---------- Click a block to fill a field ----------
+
+  /// Form fields a block can be dropped into. Status and date are excluded:
+  /// neither is ever a lump of text off the page.
+  const FILLABLE = {
+    "f-company": "Company",
+    "f-position": "Position",
+    "f-location": "Location",
+    "f-work-type": "Work type",
+    "f-employment-type": "Employment type",
+    "f-salary-range": "Salary range",
+    "f-job-id": "Job ID",
+    "f-url": "URL",
+    "f-notes": "Notes",
+  };
+
+  // Tracked on focusin rather than read at click time: clicking a block
+  // has already moved focus off the field by then.
+  dom.form.addEventListener("focusin", (e) => {
+    if (FILLABLE[e.target.id]) {
+      lastFocusedField = e.target.id;
+      dom.ocrTargetLabel.textContent = FILLABLE[e.target.id];
+    }
+  });
+
+  function renderOcrBlocks() {
+    if (currentOcrBlocks.length === 0) {
+      dom.ocrBlocksPanel.hidden = true;
+      dom.ocrBlocks.innerHTML = "";
+      return;
+    }
+    dom.ocrBlocksPanel.hidden = false;
+    const target = resolveTargetField();
+    dom.ocrTargetLabel.textContent = target ? FILLABLE[target.id] : "the focused field";
+    dom.ocrBlocks.innerHTML = currentOcrBlocks
+      .map(
+        (text, i) =>
+          `<button type="button" class="ocr-block" data-block="${i}">${escapeHtml(text)}</button>`
+      )
+      .join("");
+  }
+
+  /// Which field a block should land in.
+  ///
+  /// `focusin` is the main signal, but it is not the only way a field ends
+  /// up focused, and before the first click there is no signal at all -
+  /// where a block click would otherwise do nothing. Falls back to the
+  /// first empty field, which on a fresh extraction is the one that needs
+  /// filling.
+  function resolveTargetField() {
+    const active = document.activeElement;
+    if (active && FILLABLE[active.id]) return active;
+    if (lastFocusedField) return el(lastFocusedField);
+    const firstEmpty = Object.keys(FILLABLE).find((id) => {
+      const node = el(id);
+      return node && !node.value.trim();
+    });
+    return firstEmpty ? el(firstEmpty) : null;
+  }
+
+  dom.ocrBlocks.addEventListener("click", (e) => {
+    const btn = e.target.closest(".ocr-block");
+    if (!btn) return;
+    const text = currentOcrBlocks[Number(btn.dataset.block)];
+    if (text == null) return;
+
+    const target = resolveTargetField();
+    if (!target) {
+      dom.ocrTargetLabel.textContent = "a field - click one first";
+      return;
+    }
+    lastFocusedField = target.id;
+    dom.ocrTargetLabel.textContent = FILLABLE[target.id];
+    target.value = text;
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+    btn.classList.add("just-used");
+    setTimeout(() => btn.classList.remove("just-used"), 600);
+    target.focus();
+  });
+
+  /// Tells the backend where the kept values actually sat, so the next
+  /// capture from this board starts from the corrected layout. Best-effort:
+  /// a save must never fail because learning did.
+  async function learnFromSave(application) {
+    if (!currentOcrSite || currentOcrBlocks.length === 0) return;
+    const saved = ["company", "position", "location"]
+      .map((f) => [f, application[f]])
+      .filter(([, v]) => v && String(v).trim());
+    if (saved.length === 0) return;
+    try {
+      await invoke("learn_ocr_hints", {
+        site: currentOcrSite,
+        blocks: currentOcrBlocks,
+        saved,
+      });
+    } catch (_) {
+      /* never block a save on this */
+    }
+  }
+
   // ---------- Save flow ----------
 
   function collectFormApplication() {
@@ -547,6 +662,7 @@
       if (result.outcome === "Saved") {
         dom.duplicateBanner.hidden = true;
         await saveScreenshotIfPresent(application);
+        await learnFromSave(application);
         resetCaptureArea();
         activateTab("capture");
         installDeferredUpdate();

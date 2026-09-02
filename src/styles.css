@@ -425,6 +425,59 @@ main {
   font-size: 12px;
 }
 
+.ocr-blocks-panel {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--panel);
+  border-radius: var(--radius);
+}
+
+.ocr-blocks-hint {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.ocr-blocks-hint strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ocr-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.ocr-block {
+  text-align: left;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 7px;
+  cursor: pointer;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.ocr-block:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Confirms the click landed, since the field it filled may be scrolled
+   out of view. */
+.ocr-block.just-used {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .parse-failed {
   background: var(--danger-bg);
   border-radius: var(--radius);

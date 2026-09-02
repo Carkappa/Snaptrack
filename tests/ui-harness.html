@@ -89,6 +89,10 @@
         { name: "Withdrawn", kind: "closed" },
       ],
       // What a mocked "Import a workbook..." would find.
+      // Set imagePath to null to exercise "the user cancelled the picker".
+      imagePath: "C:\\Users\\you\\Pictures\\posting.png",
+      clipboardImage:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
       importPath: "C:\Users\you\Documents\Other.xlsx",
       importRows: [
         { date_applied: "2026-08-20", company: "Datadog", position: "SRE", location: null, work_type: null, employment_type: null, salary_range: null, status: "Applied", last_updated: "2026-08-20", job_id: null, url: null, notes: null },
@@ -124,12 +128,12 @@
       import_applications: ({ path }) => {
         if (!path) throw new Error("'' no longer exists.");
         const existing = new Set(
-          state.rows.map((r) => r.company.trim().toLowerCase() + " " + r.position.trim().toLowerCase())
+          state.rows.map((r) => r.company.trim().toLowerCase() + "\u0000" + r.position.trim().toLowerCase())
         );
         const summary = { imported: 0, skipped_duplicates: 0, skipped_blank: 0 };
         for (const row of state.importRows) {
           if (!row.company.trim() && !row.position.trim()) { summary.skipped_blank += 1; continue; }
-          const key = row.company.trim().toLowerCase() + " " + row.position.trim().toLowerCase();
+          const key = row.company.trim().toLowerCase() + "\u0000" + row.position.trim().toLowerCase();
           if (existing.has(key)) { summary.skipped_duplicates += 1; continue; }
           existing.add(key);
           state.rows.push({ ...row });
@@ -223,8 +227,29 @@
         state.rows.splice(index, 1);
         return null;
       },
-      read_clipboard_image: () => null,
-      pick_image_file: () => null,
+      extract_with_local_ocr: () => ({
+        kind: "Parsed",
+        fields: {
+          company: null, // the failure the click-to-fill list exists for
+          position: "| a Amazon",
+          location: "Westboro, WI",
+          work_type: null, employment_type: null, salary_range: null,
+          job_id: null, posted_date: null, url: null, notes: null,
+        },
+        blocks: [
+          "| a Amazon",
+          "Robotics - Software Development Engineer Fall Intern/Co-op - 2026",
+          "Westboro, WI - 5 days ago - 42 people clicked apply",
+          "On-site Full-time",
+        ],
+        site: "linkedin",
+      }),
+      learn_ocr_hints: () => null,
+      // A 1x1 PNG is enough to drive the capture path; the mocked
+      // extractor ignores the bytes anyway.
+      read_clipboard_image: () => state.clipboardImage,
+      pick_image_file: () => state.imagePath,
+      read_image_file: () => ({ base64: state.clipboardImage, media_type: "image/png" }),
       pick_excel_path: () => null,
       save_screenshot: () => "screenshot.png",
       open_url: ({ url }) => {

@@ -175,6 +175,7 @@ pub fn run() {
             commands::set_extraction_method,
             commands::local_ocr_available,
             commands::extract_with_local_ocr,
+            commands::learn_ocr_hints,
             commands::get_app_version,
             commands::get_update_check_enabled,
             commands::set_update_check_enabled,
