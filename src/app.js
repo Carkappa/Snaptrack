@@ -30,6 +30,8 @@
 
     form: el("application-form"),
     editingBanner: el("editing-banner"),
+    screenshotRow: el("screenshot-row"),
+    openScreenshotBtn: el("open-screenshot-btn"),
     discardEditBtn: el("discard-edit-btn"),
     formSaveBtn: el("form-save"),
     fCompany: el("f-company"),
@@ -91,6 +93,10 @@
     apiKeyGroup: el("api-key-group"),
     apiKeyHeading: el("api-key-heading"),
     apiKeyHelp: el("api-key-help"),
+    settingsModel: el("settings-model"),
+    settingsModelSave: el("settings-model-save"),
+    settingsModelReset: el("settings-model-reset"),
+    settingsModelMessage: el("settings-model-message"),
     apiKeyStatus: el("api-key-status"),
     settingsApiKey: el("settings-api-key"),
     settingsSaveKey: el("settings-save-key"),
@@ -290,8 +296,40 @@
   function exitEditMode() {
     editingIndex = null;
     dom.editingBanner.hidden = true;
+    dom.screenshotRow.hidden = true;
     dom.formSaveBtn.textContent = "Save (Enter)";
   }
+
+  /// The capture a row came from is archived next to the workbook but was
+  /// never reachable from the app. Offered only when one actually exists -
+  /// rows typed by hand or imported have none, and that is not a fault.
+  async function showScreenshotIfArchived(app) {
+    dom.screenshotRow.hidden = true;
+    try {
+      const path = await invoke("screenshot_for_application", {
+        company: app.company,
+        position: app.position,
+        dateApplied: app.date_applied,
+      });
+      if (path) dom.screenshotRow.hidden = false;
+    } catch (_) {
+      /* no screenshot, or the workbook path is unset - stay hidden */
+    }
+  }
+
+  dom.openScreenshotBtn.addEventListener("click", async () => {
+    const app = allApplications[editingIndex];
+    if (!app) return;
+    try {
+      await invoke("open_screenshot", {
+        company: app.company,
+        position: app.position,
+        dateApplied: app.date_applied,
+      });
+    } catch (e) {
+      showRetryToast(String(e), () => dom.openScreenshotBtn.click());
+    }
+  });
 
   function enterEditModeFor(index) {
     const app = allApplications[index];
@@ -317,6 +355,7 @@
     dom.form.hidden = false;
     activateTab("capture");
     dom.fCompany.focus();
+    showScreenshotIfArchived(app);
   }
 
   dom.discardEditBtn.addEventListener("click", () => {
@@ -1176,7 +1215,37 @@
     dom.settingsApiKey.value = "";
     dom.settingsKeyMessage.hidden = true;
     await refreshApiKeyStatus();
+    await loadModel();
   }
+
+  async function loadModel() {
+    const provider = currentProvider();
+    if (!provider.needs_key) return;
+    try {
+      dom.settingsModel.value = await invoke("get_model", { provider: provider.id });
+    } catch (_) {
+      dom.settingsModel.value = provider.default_model || "";
+    }
+    dom.settingsModel.placeholder = provider.default_model || "";
+  }
+
+  async function saveModel(value) {
+    const provider = currentProvider();
+    try {
+      const inForce = await invoke("set_model", { provider: provider.id, model: value });
+      dom.settingsModel.value = inForce;
+      dom.settingsModelMessage.textContent =
+        value.trim() === ""
+          ? `Back to the default, ${inForce}.`
+          : `${provider.label} will use ${inForce}.`;
+    } catch (e) {
+      dom.settingsModelMessage.textContent = String(e);
+      await loadModel();
+    }
+  }
+
+  dom.settingsModelSave.addEventListener("click", () => saveModel(dom.settingsModel.value));
+  dom.settingsModelReset.addEventListener("click", () => saveModel(""));
 
   async function loadExtractionMethod() {
     try {

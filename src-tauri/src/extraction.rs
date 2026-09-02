@@ -2,7 +2,6 @@ use crate::models::{ExtractedFields, ExtractionResult};
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ANTHROPIC_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
-const MODEL: &str = "claude-sonnet-4-6";
 
 const SYSTEM_PROMPT: &str = r#"You are extracting structured data from a screenshot of a job posting or job-application confirmation page (e.g. LinkedIn, Greenhouse, Lever, a company careers page).
 
@@ -36,10 +35,6 @@ fn strip_code_fences(text: &str) -> String {
     without_fence.trim().to_string()
 }
 
-const CLAUDE_MODEL: &str = "claude-sonnet-5";
-const OPENAI_MODEL: &str = "gpt-4o";
-const GEMINI_MODEL: &str = "gemini-2.0-flash";
-
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const GEMINI_URL_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -49,9 +44,9 @@ const USER_PROMPT: &str = "Extract the job posting fields from this screenshot a
 /// a question - in its own shape. These build the body; the caller sends it.
 /// Keeping them pure means the wire format is covered by tests without a
 /// network call or an API key.
-fn claude_body(image_base64: &str, media_type: &str) -> serde_json::Value {
+fn claude_body(model: &str, image_base64: &str, media_type: &str) -> serde_json::Value {
     serde_json::json!({
-        "model": CLAUDE_MODEL,
+        "model": model,
         "max_tokens": 1024,
         "system": SYSTEM_PROMPT,
         "messages": [{
@@ -65,9 +60,9 @@ fn claude_body(image_base64: &str, media_type: &str) -> serde_json::Value {
     })
 }
 
-fn openai_body(image_base64: &str, media_type: &str) -> serde_json::Value {
+fn openai_body(model: &str, image_base64: &str, media_type: &str) -> serde_json::Value {
     serde_json::json!({
-        "model": OPENAI_MODEL,
+        "model": model,
         "max_tokens": 1024,
         "messages": [
             { "role": "system", "content": SYSTEM_PROMPT },
@@ -80,7 +75,7 @@ fn openai_body(image_base64: &str, media_type: &str) -> serde_json::Value {
     })
 }
 
-fn gemini_body(image_base64: &str, media_type: &str) -> serde_json::Value {
+fn gemini_body(model: &str, image_base64: &str, media_type: &str) -> serde_json::Value {
     serde_json::json!({
         "systemInstruction": { "parts": [{ "text": SYSTEM_PROMPT }] },
         "contents": [{
@@ -169,6 +164,7 @@ fn provider_display_name(provider: &str) -> &str {
 /// image/jpeg, image/webp or image/gif.
 pub async fn extract_fields_from_image(
     provider: &str,
+    model: &str,
     api_key: &str,
     image_base64: &str,
     media_type: &str,
@@ -181,17 +177,17 @@ pub async fn extract_fields_from_image(
             .post(ANTHROPIC_MESSAGES_URL)
             .header("x-api-key", api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
-            .json(&claude_body(image_base64, media_type)),
+            .json(&claude_body(model, image_base64, media_type)),
         "openai" => client
             .post(OPENAI_URL)
             .header("authorization", format!("Bearer {api_key}"))
-            .json(&openai_body(image_base64, media_type)),
+            .json(&openai_body(model, image_base64, media_type)),
         "gemini" => client
             // The key goes in a header, not the query string, so it cannot
             // end up in a proxy log or a redirect.
-            .post(format!("{GEMINI_URL_BASE}/{GEMINI_MODEL}:generateContent"))
+            .post(format!("{GEMINI_URL_BASE}/{model}:generateContent"))
             .header("x-goog-api-key", api_key)
-            .json(&gemini_body(image_base64, media_type)),
+            .json(&gemini_body(model, image_base64, media_type)),
         other => {
             return Err(format!(
                 "'{other}' has no cloud extraction. Choose Tesseract, Claude, ChatGPT or Gemini in Settings."
@@ -278,8 +274,8 @@ mod tests {
 
     #[test]
     fn claude_sends_the_image_as_a_base64_source_block() {
-        let b = claude_body("BASE64DATA", "image/png");
-        assert_eq!(b["model"], CLAUDE_MODEL);
+        let b = claude_body("test-model", "BASE64DATA", "image/png");
+        assert_eq!(b["model"], "test-model");
         let content = &b["messages"][0]["content"];
         assert_eq!(content[0]["type"], "image");
         assert_eq!(content[0]["source"]["type"], "base64");
@@ -290,8 +286,8 @@ mod tests {
 
     #[test]
     fn openai_sends_the_image_as_a_data_url() {
-        let b = openai_body("BASE64DATA", "image/jpeg");
-        assert_eq!(b["model"], OPENAI_MODEL);
+        let b = openai_body("test-model", "BASE64DATA", "image/jpeg");
+        assert_eq!(b["model"], "test-model");
         assert_eq!(b["messages"][0]["role"], "system");
         assert_eq!(b["messages"][0]["content"], SYSTEM_PROMPT);
         let parts = &b["messages"][1]["content"];
@@ -305,7 +301,7 @@ mod tests {
 
     #[test]
     fn gemini_sends_the_image_as_inline_data() {
-        let b = gemini_body("BASE64DATA", "image/webp");
+        let b = gemini_body("test-model", "BASE64DATA", "image/webp");
         assert_eq!(b["systemInstruction"]["parts"][0]["text"], SYSTEM_PROMPT);
         let parts = &b["contents"][0]["parts"];
         assert_eq!(parts[1]["inlineData"]["mimeType"], "image/webp");
@@ -315,9 +311,9 @@ mod tests {
     #[test]
     fn every_provider_carries_the_same_system_prompt_and_image() {
         for body in [
-            claude_body("D", "image/png"),
-            openai_body("D", "image/png"),
-            gemini_body("D", "image/png"),
+            claude_body("m", "D", "image/png"),
+            openai_body("m", "D", "image/png"),
+            gemini_body("m", "D", "image/png"),
         ] {
             let text = body.to_string();
             assert!(text.contains("BASE64DATA") || text.contains("\"D\"") || text.contains(",D"),

@@ -321,7 +321,13 @@ Change the path from the Settings tab at any time.
   10), so a bad edit never loses prior data.
 - **Screenshot archive.** When a save came from a screenshot, a copy is
   kept in `JobApplications_screenshots/` next to the workbook, named by
-  date/company/position — handy if a listing gets taken down later.
+  date/company/position. Open a row for editing and, if a capture was
+  archived for it, **Open screenshot** opens it in your image viewer —
+  useful once the listing has been taken down.
+- **Pick the model.** Each cloud provider's card has a Model field,
+  defaulting to a current model. If a provider retires one, change it
+  there rather than waiting for a new release; blank goes back to the
+  default.
 - **Status counts.** A small `12 Applied · 3 Interviewing · ...` line
   above the Applications list, computed from what's already loaded.
 - **Calendar.** A month grid shading each day by how many applications

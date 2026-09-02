@@ -538,3 +538,102 @@ fn importing_the_workbook_you_are_already_using_is_refused() {
     assert!(err.contains("already tracking"), "unexpected error: {err}");
     assert_eq!(commands::list_applications(handle.clone()).unwrap().len(), 1);
 }
+
+/// The archive `save_screenshot` writes has to be findable again, and the
+/// lookup has to build the same name the writer did.
+#[test]
+fn an_archived_screenshot_is_found_again() {
+    use base64::Engine;
+
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    let dir = temp_dir_for("shot-lookup");
+    let xlsx_path = dir.join("Shots.xlsx");
+    let _ = std::fs::remove_dir_all(dir.join("JobApplications_screenshots"));
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string()).unwrap();
+
+    let row = amazon_application();
+    // Nothing archived yet.
+    assert_eq!(
+        commands::screenshot_for_application(
+            handle.clone(),
+            row.company.clone(),
+            row.position.clone(),
+            row.date_applied.clone()
+        )
+        .unwrap(),
+        None,
+        "a row with no capture behind it must report no screenshot"
+    );
+
+    // A 1x1 PNG is enough - only the naming is under test.
+    let png = base64::engine::general_purpose::STANDARD.encode([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+    ]);
+    let written = commands::save_screenshot(
+        handle.clone(),
+        row.company.clone(),
+        row.position.clone(),
+        row.date_applied.clone(),
+        png,
+        "image/png".into(),
+    )
+    .expect("archiving should succeed");
+
+    let found = commands::screenshot_for_application(
+        handle.clone(),
+        row.company.clone(),
+        row.position.clone(),
+        row.date_applied.clone(),
+    )
+    .unwrap()
+    .expect("the archived screenshot must be findable");
+    assert_eq!(found, written, "the lookup must resolve to the file just written");
+
+    // A position with characters the filename sanitiser rewrites still
+    // round-trips, since both sides go through the same helper.
+    assert!(
+        row.position.contains('/'),
+        "this fixture is meant to contain a character that gets sanitised"
+    );
+
+    // A different row must not match this file.
+    assert_eq!(
+        commands::screenshot_for_application(
+            handle,
+            "Someone Else".into(),
+            row.position.clone(),
+            row.date_applied
+        )
+        .unwrap(),
+        None
+    );
+}
+
+/// The model is a setting, so a provider retiring one doesn't need a release.
+#[test]
+fn a_provider_model_can_be_overridden_and_cleared() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    // Starts at the shipped default.
+    let shipped = job_tracker_lib::models::provider_or_default("openai").default_model;
+    assert!(!shipped.is_empty());
+    assert_eq!(commands::get_model(handle.clone(), "openai".into()), shipped);
+
+    let set = commands::set_model(handle.clone(), "openai".into(), "gpt-5-vision".into()).unwrap();
+    assert_eq!(set, "gpt-5-vision");
+    assert_eq!(commands::get_model(handle.clone(), "openai".into()), "gpt-5-vision");
+
+    // One provider's override must not touch another's.
+    assert_eq!(
+        commands::get_model(handle.clone(), "gemini".into()),
+        job_tracker_lib::models::provider_or_default("gemini").default_model
+    );
+
+    // Blanking it goes back to the default rather than sending an empty model.
+    let cleared = commands::set_model(handle.clone(), "openai".into(), "   ".into()).unwrap();
+    assert_eq!(cleared, shipped);
+    assert_eq!(commands::get_model(handle, "openai".into()), shipped);
+}

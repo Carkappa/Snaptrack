@@ -27,6 +27,9 @@ pub struct ExtractionProvider {
     pub key_placeholder: String,
     /// Where to get one. Shown under the field.
     pub key_help: String,
+    /// The model used unless the user overrides it. Empty for a provider
+    /// that has no model to choose.
+    pub default_model: String,
 }
 
 impl ExtractionProvider {
@@ -37,6 +40,7 @@ impl ExtractionProvider {
         key_label: &str,
         key_placeholder: &str,
         key_help: &str,
+        default_model: &str,
     ) -> Self {
         Self {
             id: id.to_string(),
@@ -45,6 +49,7 @@ impl ExtractionProvider {
             key_label: key_label.to_string(),
             key_placeholder: key_placeholder.to_string(),
             key_help: key_help.to_string(),
+            default_model: default_model.to_string(),
         }
     }
 }
@@ -60,6 +65,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "",
             "",
             "",
+            "",
         ),
         ExtractionProvider::new(
             "claude",
@@ -68,6 +74,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "Anthropic API key",
             "sk-ant-...",
             "Create one at console.anthropic.com under API Keys.",
+            "claude-sonnet-5",
         ),
         ExtractionProvider::new(
             "openai",
@@ -76,6 +83,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "OpenAI API key",
             "sk-...",
             "Create one at platform.openai.com/api-keys.",
+            "gpt-4o",
         ),
         ExtractionProvider::new(
             "gemini",
@@ -84,6 +92,7 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "Google AI Studio API key",
             "AIza...",
             "Create one at aistudio.google.com/apikey.",
+            "gemini-2.0-flash",
         ),
     ]
 }
@@ -126,6 +135,21 @@ mod provider_tests {
                 !p.key_label.to_lowercase().contains("anthropic") || p.id == "claude",
                 "only Claude's card may mention Anthropic"
             );
+        }
+    }
+
+    #[test]
+    fn every_cloud_provider_names_a_default_model() {
+        for p in extraction_providers() {
+            if p.needs_key {
+                assert!(!p.default_model.is_empty(), "{} needs a model", p.id);
+            } else {
+                assert!(
+                    p.default_model.is_empty(),
+                    "{} runs locally and has no model to pick",
+                    p.id
+                );
+            }
         }
     }
 

@@ -79,6 +79,11 @@
             <span>Editing an existing entry</span>
             <button type="button" id="discard-edit-btn" class="btn btn-link btn-small">Discard changes</button>
           </div>
+
+          <div id="screenshot-row" class="screenshot-row" hidden>
+            <span>The screenshot this was captured from is archived.</span>
+            <button type="button" id="open-screenshot-btn" class="btn btn-secondary btn-small">Open screenshot</button>
+          </div>
           <div class="field-row">
             <label for="f-company">Company *</label>
             <input id="f-company" name="company" type="text" required />
@@ -297,6 +302,17 @@
             <button id="settings-delete-key" class="btn btn-link">Remove stored key</button>
           </div>
           <div id="settings-key-message" class="hint" hidden></div>
+
+          <label for="settings-model" class="settings-sublabel">Model</label>
+          <div class="path-row">
+            <input id="settings-model" type="text" autocomplete="off" spellcheck="false" />
+            <button id="settings-model-save" class="btn btn-secondary">Save</button>
+            <button id="settings-model-reset" class="btn btn-link">Default</button>
+          </div>
+          <p id="settings-model-message" class="hint">
+            Change this if the provider retires the model, so extraction keeps
+            working without waiting for an update. Blank goes back to the default.
+          </p>
         </div>
 
         <div class="settings-group">

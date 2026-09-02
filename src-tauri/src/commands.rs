@@ -13,6 +13,7 @@ const DEFAULT_EXTRACTION_METHOD: &str = crate::models::DEFAULT_PROVIDER;
 const HOTKEY_KEY: &str = "capture_hotkey";
 const SEEN_WELCOME_KEY: &str = "seen_welcome";
 const STATUS_DEFS_KEY: &str = "status_defs";
+const MODELS_KEY: &str = "provider_models";
 const UPDATE_CHECK_ENABLED_KEY: &str = "update_check_enabled";
 const AUTO_INSTALL_UPDATES_KEY: &str = "auto_install_updates";
 const LAST_UPDATE_CHECK_KEY: &str = "last_update_check";
@@ -101,6 +102,59 @@ pub fn get_extraction_providers() -> Vec<crate::models::ExtractionProvider> {
     crate::models::extraction_providers()
 }
 
+/// The model in force for a provider: the user's override if they set one,
+/// otherwise the shipped default. An override that has been blanked falls
+/// back rather than sending an empty model name.
+fn resolve_model<R: tauri::Runtime>(app: &tauri::AppHandle<R>, provider: &str) -> String {
+    let default = crate::models::provider_or_default(provider).default_model;
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(MODELS_KEY))
+        .and_then(|v| v.get(provider).and_then(|m| m.as_str()).map(str::to_string))
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .unwrap_or(default)
+}
+
+#[tauri::command]
+pub fn get_model<R: tauri::Runtime>(app: tauri::AppHandle<R>, provider: String) -> String {
+    resolve_model(&app, &provider)
+}
+
+/// Sets the model for a provider. An empty value clears the override and
+/// goes back to the shipped default, which is the way out if someone types
+/// a model name that doesn't exist.
+#[tauri::command]
+pub fn set_model<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    provider: String,
+    model: String,
+) -> Result<String, String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    let mut all = store
+        .get(MODELS_KEY)
+        .and_then(|v| serde_json::from_value::<std::collections::HashMap<String, String>>(v).ok())
+        .unwrap_or_default();
+
+    let trimmed = model.trim().to_string();
+    if trimmed.is_empty() {
+        all.remove(&provider);
+    } else {
+        all.insert(provider.clone(), trimmed);
+    }
+
+    store.set(
+        MODELS_KEY,
+        serde_json::to_value(&all).map_err(|e| e.to_string())?,
+    );
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))?;
+    Ok(resolve_model(&app, &provider))
+}
+
 #[tauri::command]
 pub fn has_api_key(provider: String) -> bool {
     keychain::has_api_key(&provider)
@@ -122,6 +176,7 @@ pub async fn extract_from_image<R: tauri::Runtime>(
     image_base64: String,
     media_type: String,
 ) -> Result<ExtractionResult, String> {
+    let app_for_model = app.clone();
     let method = get_extraction_method(app)?;
     let provider = crate::models::provider_or_default(&method);
     if !provider.needs_key {
@@ -131,7 +186,15 @@ pub async fn extract_from_image<R: tauri::Runtime>(
         ));
     }
     let api_key = keychain::get_api_key(&provider.id)?;
-    extraction::extract_fields_from_image(&provider.id, &api_key, &image_base64, &media_type).await
+    let model = resolve_model(&app_for_model, &provider.id);
+    extraction::extract_fields_from_image(
+        &provider.id,
+        &model,
+        &api_key,
+        &image_base64,
+        &media_type,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -532,6 +595,44 @@ pub fn export_csv<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String,
     Ok(csv_path.to_string_lossy().to_string())
 }
 
+const SCREENSHOTS_DIR: &str = "JobApplications_screenshots";
+
+/// Extensions `save_screenshot` can have written, newest-first by how
+/// likely they are: the clipboard path always produces PNG.
+const SCREENSHOT_EXTENSIONS: [&str; 4] = ["png", "jpg", "webp", "gif"];
+
+/// The name `save_screenshot` gives a capture, without its extension.
+/// Kept next to the writer so the two can't drift apart - a lookup that
+/// builds the name differently would silently find nothing.
+fn screenshot_stem(company: &str, position: &str, date_applied: &str) -> String {
+    format!(
+        "{}_{}_{}",
+        sanitize_for_filename(date_applied),
+        sanitize_for_filename(company),
+        sanitize_for_filename(position)
+    )
+}
+
+/// Finds the archived screenshot for a row, if one was ever saved. Returns
+/// None rather than erroring: most rows have no screenshot (typed by hand,
+/// imported, or captured before archiving existed), and that is not a fault.
+pub fn find_screenshot(
+    workbook: &std::path::Path,
+    company: &str,
+    position: &str,
+    date_applied: &str,
+) -> Option<PathBuf> {
+    let dir = workbook
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())?
+        .join(SCREENSHOTS_DIR);
+    let stem = screenshot_stem(company, position, date_applied);
+    SCREENSHOT_EXTENSIONS
+        .iter()
+        .map(|ext| dir.join(format!("{stem}.{ext}")))
+        .find(|p| p.is_file())
+}
+
 fn sanitize_for_filename(s: &str) -> String {
     let cleaned: String = s
         .chars()
@@ -578,15 +679,13 @@ pub fn save_screenshot<R: tauri::Runtime>(
         .filter(|p| !p.as_os_str().is_empty())
         .ok_or_else(|| "Workbook has no parent directory.".to_string())?;
 
-    let screenshots_dir = parent.join("JobApplications_screenshots");
+    let screenshots_dir = parent.join(SCREENSHOTS_DIR);
     std::fs::create_dir_all(&screenshots_dir)
         .map_err(|e| format!("Could not create '{}': {e}", screenshots_dir.display()))?;
 
     let file_name = format!(
-        "{}_{}_{}.{}",
-        sanitize_for_filename(&date_applied),
-        sanitize_for_filename(&company),
-        sanitize_for_filename(&position),
+        "{}.{}",
+        screenshot_stem(&company, &position, &date_applied),
         extension_for_media_type(&media_type)
     );
     let file_path = screenshots_dir.join(file_name);
@@ -847,4 +946,42 @@ pub fn set_seen_welcome<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(
     store
         .save()
         .map_err(|e| format!("Could not persist settings: {e}"))
+}
+
+/// Whether this row has an archived screenshot, so the UI can offer to
+/// open it only when there is one.
+#[tauri::command]
+pub fn screenshot_for_application<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    company: String,
+    position: String,
+    date_applied: String,
+) -> Result<Option<String>, String> {
+    let workbook = resolve_excel_path(&app)?;
+    Ok(find_screenshot(&workbook, &company, &position, &date_applied)
+        .map(|p| p.to_string_lossy().to_string()))
+}
+
+/// Opens an archived screenshot in the system image viewer.
+///
+/// The path is re-derived from the row rather than trusted from the
+/// frontend: this hands a path to the OS opener, and the only paths it
+/// should ever open are files this app wrote into its own screenshots
+/// folder.
+#[tauri::command]
+pub fn open_screenshot<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    company: String,
+    position: String,
+    date_applied: String,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let workbook = resolve_excel_path(&app)?;
+    let path = find_screenshot(&workbook, &company, &position, &date_applied)
+        .ok_or_else(|| "No screenshot was archived for this application.".to_string())?;
+
+    app.opener()
+        .open_path(path.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| format!("Couldn't open the screenshot: {e}"))
 }
