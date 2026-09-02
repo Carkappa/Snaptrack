@@ -73,6 +73,16 @@ machine. Or use none of them and type entries in by hand.
 Set a running order under **If that doesn't work** and the next choice takes
 over when one fails — an expired key, a rate limit, no network.
 
+## Tailoring your resume
+
+Keep your full resume — everything you've done — under **Resume**. Pick a
+saved application or paste a posting, and it writes a shorter one aimed at
+that job, saved as `Resumes/Company-Role.md` beside your workbook.
+
+The model is told to cut and reorder, never to invent. **Read it before you
+send it** — if it claims something you didn't do, that's a bug worth
+reporting. Needs a model-backed method; the OCR engines read but can't write.
+
 ## Also
 
 Calendar of applications per day · overview with response rate · edit, delete

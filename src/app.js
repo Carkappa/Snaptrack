@@ -99,6 +99,18 @@
     ollamaGroup: el("ollama-group"),
     ollamaStatus: el("ollama-status"),
     ollamaModelRow: el("ollama-model-row"),
+    masterResume: el("master-resume"),
+    masterResumeSave: el("master-resume-save"),
+    masterResumeMessage: el("master-resume-message"),
+    resumeJobPicker: el("resume-job-picker"),
+    resumeJobText: el("resume-job-text"),
+    resumeTailor: el("resume-tailor"),
+    resumeTailorMessage: el("resume-tailor-message"),
+    resumeResultGroup: el("resume-result-group"),
+    resumeResult: el("resume-result"),
+    resumeSaveFile: el("resume-save-file"),
+    resumeOpenFile: el("resume-open-file"),
+    resumeSaveMessage: el("resume-save-message"),
     providerCards: el("provider-cards"),
     settingsOllamaModel: el("settings-ollama-model"),
     ollamaPullRow: el("ollama-pull-row"),
@@ -230,6 +242,9 @@
     dom.tabPanels.forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${name}`));
     if (name === "list" || name === "calendar") {
       loadApplications();
+    }
+    if (name === "resume") {
+      loadResumeTab();
     }
   }
 
@@ -1314,6 +1329,107 @@ ${e}`;
     calCursor = { year: calTodayParts.year, month: calTodayParts.month };
     calSelectedDay = cal.iso(calTodayParts.year, calTodayParts.month, calTodayParts.day);
     renderCalendar();
+  });
+
+  // ---------- Resume tab ----------
+
+  let savedResumePath = null;
+
+  async function loadResumeTab() {
+    try {
+      dom.masterResume.value = await invoke("get_master_resume");
+    } catch (e) {
+      dom.masterResumeMessage.textContent = String(e);
+    }
+    // The picker is filled from the workbook, so tailoring can start from
+    // a row already saved rather than retyping the company and role.
+    if (allApplications.length === 0) {
+      try {
+        allApplications = await invoke("list_applications");
+      } catch (_) {
+        /* the picker just stays empty */
+      }
+    }
+    const current = dom.resumeJobPicker.value;
+    dom.resumeJobPicker.innerHTML =
+      `<option value="">Not one of my saved applications</option>` +
+      allApplications
+        .map(
+          (app, i) =>
+            `<option value="${i}">${escapeHtml(app.company)} - ${escapeHtml(app.position)}</option>`
+        )
+        .join("");
+    if (current) dom.resumeJobPicker.value = current;
+  }
+
+  dom.masterResumeSave.addEventListener("click", async () => {
+    try {
+      const path = await invoke("set_master_resume", { text: dom.masterResume.value });
+      dom.masterResumeMessage.textContent = `Saved to ${path}`;
+    } catch (e) {
+      dom.masterResumeMessage.textContent = String(e);
+    }
+  });
+
+  function selectedResumeJob() {
+    const index = dom.resumeJobPicker.value;
+    return index === "" ? null : allApplications[Number(index)];
+  }
+
+  dom.resumeTailor.addEventListener("click", async () => {
+    const job = selectedResumeJob();
+    const pasted = dom.resumeJobText.value.trim();
+    if (!job && !pasted) {
+      dom.resumeTailorMessage.textContent =
+        "Pick an application, or paste the posting.";
+      return;
+    }
+
+    dom.resumeTailor.disabled = true;
+    dom.resumeTailorMessage.textContent = "Writing… this takes a few seconds.";
+    try {
+      const text = await invoke("tailor_resume", {
+        company: job ? job.company : "",
+        position: job ? job.position : "",
+        location: job && job.location ? job.location : "",
+        notes: job && job.notes ? job.notes : "",
+        pasted,
+      });
+      dom.resumeResult.value = text;
+      dom.resumeResultGroup.hidden = false;
+      dom.resumeTailorMessage.textContent = "Done - read it before you send it.";
+      savedResumePath = null;
+      dom.resumeOpenFile.hidden = true;
+      dom.resumeSaveMessage.textContent = "";
+    } catch (e) {
+      dom.resumeTailorMessage.textContent = String(e);
+    } finally {
+      dom.resumeTailor.disabled = false;
+    }
+  });
+
+  dom.resumeSaveFile.addEventListener("click", async () => {
+    const job = selectedResumeJob();
+    try {
+      savedResumePath = await invoke("save_tailored_resume", {
+        company: job ? job.company : "",
+        position: job ? job.position : "",
+        text: dom.resumeResult.value,
+      });
+      dom.resumeSaveMessage.textContent = `Saved to ${savedResumePath}`;
+      dom.resumeOpenFile.hidden = false;
+    } catch (e) {
+      dom.resumeSaveMessage.textContent = String(e);
+    }
+  });
+
+  dom.resumeOpenFile.addEventListener("click", async () => {
+    if (!savedResumePath) return;
+    try {
+      await invoke("open_saved_resume", { path: savedResumePath });
+    } catch (e) {
+      dom.resumeSaveMessage.textContent = String(e);
+    }
   });
 
   // ---------- Settings tab ----------

@@ -1567,6 +1567,18 @@ button.detail-row.active {
   padding: 2px 0;
 }
 
+#tab-resume textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+#resume-job-picker {
+  margin-bottom: 4px;
+}
+
 .model-detail {
   margin-top: 6px;
   line-height: 1.45;

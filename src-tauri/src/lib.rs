@@ -3,6 +3,7 @@ mod excel;
 mod extraction;
 mod keychain;
 mod local_ocr;
+pub mod resume;
 pub mod system_ocr;
 pub mod models;
 pub mod updates;
@@ -177,6 +178,11 @@ pub fn run() {
             commands::import_applications,
             commands::pick_import_file,
             commands::export_csv,
+            commands::get_master_resume,
+            commands::set_master_resume,
+            commands::tailor_resume,
+            commands::save_tailored_resume,
+            commands::open_saved_resume,
             commands::save_screenshot,
             commands::get_extraction_method,
             commands::set_extraction_method,

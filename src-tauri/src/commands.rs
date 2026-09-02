@@ -1875,3 +1875,141 @@ pub async fn extract_with_chain<R: tauri::Runtime>(
     // the list, while the failure worth reading is the first choice's.
     Err(errors.join("\n"))
 }
+
+// ---------- Resume tailoring ----------
+
+/// The master resume, or an empty string when there isn't one yet.
+#[tauri::command]
+pub fn get_master_resume<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
+    let workbook = resolve_excel_path(&app)?;
+    let Some(path) = crate::resume::master_path(&workbook) else {
+        return Ok(String::new());
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(format!("Could not read '{}': {e}", path.display())),
+    }
+}
+
+/// Saves the master resume beside the workbook, as a plain file the user
+/// can open and edit in anything.
+#[tauri::command]
+pub fn set_master_resume<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    text: String,
+) -> Result<String, String> {
+    let workbook = resolve_excel_path(&app)?;
+    let path = crate::resume::master_path(&workbook)
+        .ok_or_else(|| "The workbook has no folder to save alongside.".to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Could not create '{}': {e}", parent.display()))?;
+    }
+    std::fs::write(&path, text)
+        .map_err(|e| format!("Could not save '{}': {e}", path.display()))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Rewrites the master resume for one posting.
+///
+/// Uses whichever model-backed method is configured. The OCR engines can
+/// read a screenshot but not write, so they are refused with a message
+/// saying what to pick instead rather than a confusing failure.
+#[tauri::command]
+pub async fn tailor_resume<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    company: String,
+    position: String,
+    location: String,
+    notes: String,
+    pasted: String,
+) -> Result<String, String> {
+    let master = get_master_resume(app.clone())?;
+    if master.trim().is_empty() {
+        return Err("Save your full resume first - there is nothing to tailor.".to_string());
+    }
+
+    let method = get_extraction_method(app.clone())?;
+    let provider = crate::models::provider_or_default(&method);
+    if provider.default_model.is_empty() {
+        return Err(format!(
+            "{} reads screenshots but cannot write. Pick Ollama or a cloud method in Settings.",
+            provider.label
+        ));
+    }
+
+    let api_key = if provider.needs_key {
+        keychain::get_api_key(&provider.id)?
+    } else {
+        String::new()
+    };
+    let api_base = if provider.id == "ollama" {
+        resolve_ollama_host(&app)
+    } else {
+        provider.api_base.clone()
+    };
+    let model = resolve_model(&app, &provider.id);
+
+    let brief = crate::resume::job_brief(&company, &position, &location, &notes, &pasted);
+    let user = format!(
+        "Here is the job posting:\n\n{brief}\n\n---\n\nHere is the full resume to tailor:\n\n{master}"
+    );
+
+    extraction::chat_text(
+        &provider.id,
+        &model,
+        &api_key,
+        &api_base,
+        crate::resume::SYSTEM_PROMPT,
+        &user,
+    )
+    .await
+}
+
+/// Writes a tailored resume into a Resumes folder beside the workbook,
+/// named after the job it was written for.
+#[tauri::command]
+pub fn save_tailored_resume<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    company: String,
+    position: String,
+    text: String,
+) -> Result<String, String> {
+    if text.trim().is_empty() {
+        return Err("There is nothing to save yet.".to_string());
+    }
+    let workbook = resolve_excel_path(&app)?;
+    let dir = crate::resume::output_dir(&workbook)
+        .ok_or_else(|| "The workbook has no folder to save alongside.".to_string())?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create '{}': {e}", dir.display()))?;
+
+    let path = dir.join(crate::resume::output_name(&company, &position));
+    std::fs::write(&path, text)
+        .map_err(|e| format!("Could not save '{}': {e}", path.display()))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Opens a saved resume in whatever the system uses for Markdown.
+#[tauri::command]
+pub fn open_saved_resume<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    // Re-derived rather than trusted: this hands a path to the OS opener,
+    // and the only ones it should open are files this app wrote.
+    let workbook = resolve_excel_path(&app)?;
+    let dir = crate::resume::output_dir(&workbook)
+        .ok_or_else(|| "The workbook has no folder.".to_string())?;
+    let requested = PathBuf::from(&path);
+    if requested.parent() != Some(dir.as_path()) {
+        return Err("That file is not one of the saved resumes.".to_string());
+    }
+
+    app.opener()
+        .open_path(requested.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| format!("Couldn't open it: {e}"))
+}

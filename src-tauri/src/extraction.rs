@@ -494,6 +494,93 @@ async fn send_with_retry(
     unreachable!("the loop returns on the final attempt")
 }
 
+/// Sends a prompt and gets prose back, for work that is not extraction.
+///
+/// The rest of this module turns a screenshot into fields, which needs a
+/// schema and an image. Tailoring a resume needs neither - it is text in,
+/// text out - so it shares the providers and the keys but not the request
+/// shape.
+pub async fn chat_text(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    api_base: &str,
+    system: &str,
+    user: &str,
+) -> Result<String, String> {
+    let name = provider_display_name(provider);
+    let client = reqwest::Client::new();
+
+    let request = match provider {
+        "claude" => client
+            .post(ANTHROPIC_MESSAGES_URL)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .json(&serde_json::json!({
+                "model": model,
+                "max_tokens": 4096,
+                "system": system,
+                "messages": [{ "role": "user", "content": user }]
+            })),
+        "gemini" => client
+            .post(format!("{GEMINI_URL_BASE}/{model}:generateContent"))
+            .header("x-goog-api-key", api_key)
+            .json(&serde_json::json!({
+                "systemInstruction": { "parts": [{ "text": system }] },
+                "contents": [{ "role": "user", "parts": [{ "text": user }] }],
+                "generationConfig": { "maxOutputTokens": 4096 }
+            })),
+        "openai" | "tamu" => client
+            .post(format!("{}/chat/completions", api_base.trim_end_matches('/')))
+            .header("authorization", format!("Bearer {api_key}"))
+            .json(&serde_json::json!({
+                "model": model,
+                "stream": false,
+                "messages": [
+                    { "role": "system", "content": system },
+                    { "role": "user", "content": user }
+                ]
+            })),
+        "ollama" => client
+            .post(format!("{}/api/chat", api_base.trim_end_matches('/')))
+            .json(&serde_json::json!({
+                "model": model,
+                "stream": false,
+                "keep_alive": 0,
+                "messages": [
+                    { "role": "system", "content": system },
+                    { "role": "user", "content": user }
+                ]
+            })),
+        other => {
+            return Err(format!(
+                "{other} reads screenshots but cannot write. Choose a model-backed method in Settings."
+            ))
+        }
+    };
+
+    let (status, body_text) = send_with_retry(request, name).await?;
+    if !status.is_success() {
+        return Err(describe_api_error(name, status, &body_text));
+    }
+
+    let body: serde_json::Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("Unexpected {name} response shape: {e}"))?;
+    let key = if provider == "ollama" { "ollama" } else { provider };
+    let text = match key {
+        "ollama" => body
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .map(str::to_string),
+        _ => text_from_response(
+            if provider == "openai" || provider == "tamu" { "openai" } else { provider },
+            &body,
+        ),
+    };
+    text.ok_or_else(|| format!("{name} returned nothing."))
+}
+
 /// Asks a provider which models a key can reach.
 ///
 /// Every provider has a listing endpoint and every one shapes it

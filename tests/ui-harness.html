@@ -84,6 +84,10 @@
       ollamaHost: "http://localhost:11434",
       ollamaUnload: true,
       systemOcrAvailable: true,
+      masterResume: "",
+      tailorCalls: [],
+      savedResumes: [],
+      openedResumes: [],
       fallbackChain: [],
       // Provider ids listed here fail, to exercise the fallback path.
       chainFails: [],
@@ -369,6 +373,38 @@
       test_api_key: ({ provider }) => {
         if (!state.apiKeys[provider]) throw new Error(`No key stored for ${provider} yet.`);
         return `Key works. 6 models available, including: protected.gpt-4o.`;
+      },
+      get_master_resume: () => state.masterResume,
+      set_master_resume: ({ text }) => {
+        state.masterResume = text;
+        return "C:\Users\you\Documents\Resume_master.md";
+      },
+      tailor_resume: ({ company, position, pasted }) => {
+        if (!state.masterResume.trim()) {
+          throw new Error("Save your full resume first - there is nothing to tailor.");
+        }
+        state.tailorCalls.push({ company, position, pasted });
+        return `# Tailored for ${company || "a pasted posting"}
+
+Shortened from the master resume.`;
+      },
+      save_tailored_resume: ({ company, position, text }) => {
+        if (!text.trim()) throw new Error("There is nothing to save yet.");
+        const name = [company, position]
+          .filter(Boolean)
+          .join("-")
+          .replace(/[^0-9A-Za-z]+/g, "-")
+          .replace(/^-|-$/g, "");
+        // Forward slashes on purpose: a Windows path in a template
+        // literal needs doubled backslashes, and getting that wrong here
+        // silently breaks the interpolation rather than erroring.
+        const path = "C:/Users/you/Documents/Resumes/" + (name || "Resume") + ".md";
+        state.savedResumes.push(path);
+        return path;
+      },
+      open_saved_resume: ({ path }) => {
+        state.openedResumes.push(path);
+        return null;
       },
       workbook_exists: () => state.workbookExists,
       set_ollama_host: ({ host }) => {

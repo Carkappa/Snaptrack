@@ -50,6 +50,7 @@
       <button class="tab-btn active" data-tab="capture" role="tab" aria-selected="true">Capture</button>
       <button class="tab-btn" data-tab="list" role="tab" aria-selected="false">Applications</button>
       <button class="tab-btn" data-tab="calendar" role="tab" aria-selected="false">Calendar</button>
+      <button class="tab-btn" data-tab="resume" role="tab" aria-selected="false">Resume</button>
       <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
     </nav>
 
@@ -286,6 +287,51 @@
         </div>
 
         <p id="cal-undated" class="hint" hidden></p>
+      </section>
+
+      <!-- RESUME TAB -->
+      <section id="tab-resume" class="tab-panel">
+        <div class="settings-group">
+          <h2>Your full resume</h2>
+          <p class="hint">
+            Everything you have done, long-form - this is the source, not
+            what you send. Saved as <code>Resume_master.md</code> beside your
+            workbook, so you can edit it anywhere.
+          </p>
+          <textarea id="master-resume" rows="10" spellcheck="false"
+            placeholder="Paste your full resume here. Markdown, plain text, whatever you have."></textarea>
+          <div class="settings-actions">
+            <button id="master-resume-save" class="btn btn-secondary btn-small">Save</button>
+            <span id="master-resume-message" class="hint"></span>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h2>Tailor it to a job</h2>
+          <label for="resume-job-picker" class="settings-sublabel">Application</label>
+          <select id="resume-job-picker"></select>
+          <label for="resume-job-text" class="settings-sublabel">Job posting</label>
+          <textarea id="resume-job-text" rows="6" spellcheck="false"
+            placeholder="Paste the posting text from LinkedIn. Optional - without it, whatever was captured for this application is used."></textarea>
+          <div class="settings-actions">
+            <button id="resume-tailor" class="btn btn-primary btn-small">Tailor my resume</button>
+            <span id="resume-tailor-message" class="hint"></span>
+          </div>
+        </div>
+
+        <div class="settings-group" id="resume-result-group" hidden>
+          <h2>Tailored for this job</h2>
+          <p class="hint">
+            Read it before you send it. Nothing here should be new - if it
+            says something you did not do, delete it and tell me.
+          </p>
+          <textarea id="resume-result" rows="14" spellcheck="false"></textarea>
+          <div class="settings-actions">
+            <button id="resume-save-file" class="btn btn-secondary btn-small">Save as file</button>
+            <button id="resume-open-file" class="btn btn-link btn-small" hidden>Open it</button>
+            <span id="resume-save-message" class="hint"></span>
+          </div>
+        </div>
       </section>
 
       <!-- SETTINGS TAB -->
