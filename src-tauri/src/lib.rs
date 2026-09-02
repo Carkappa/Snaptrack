@@ -141,6 +141,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_statuses,
+            commands::get_status_defs,
+            commands::set_status_defs,
             commands::has_api_key,
             commands::get_extraction_providers,
             commands::get_model,
