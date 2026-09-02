@@ -15,6 +15,8 @@ const SEEN_WELCOME_KEY: &str = "seen_welcome";
 const STATUS_DEFS_KEY: &str = "status_defs";
 const MODELS_KEY: &str = "provider_models";
 const OCR_HINTS_KEY: &str = "ocr_field_hints";
+const OLLAMA_HOST_KEY: &str = "ollama_host";
+const DEFAULT_OLLAMA_HOST: &str = "http://localhost:11434";
 const UPDATE_CHECK_ENABLED_KEY: &str = "update_check_enabled";
 const AUTO_INSTALL_UPDATES_KEY: &str = "auto_install_updates";
 const LAST_UPDATE_CHECK_KEY: &str = "last_update_check";
@@ -269,6 +271,122 @@ pub fn extract_with_local_ocr<R: tauri::Runtime>(
 
     Ok(LocalOcrResult {
         result: ExtractionResult::Parsed { fields },
+        blocks,
+        site: site.map(str::to_string),
+    })
+}
+
+#[tauri::command]
+pub fn get_ollama_host<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> String {
+    resolve_ollama_host(&app)
+}
+
+fn resolve_ollama_host<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(OLLAMA_HOST_KEY))
+        .and_then(|v| v.as_str().map(str::to_string))
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| DEFAULT_OLLAMA_HOST.to_string())
+}
+
+/// Blank goes back to the default, which is the way out of a typo'd host.
+#[tauri::command]
+pub fn set_ollama_host<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    host: String,
+) -> Result<String, String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    let trimmed = host.trim().to_string();
+    if trimmed.is_empty() {
+        store.delete(OLLAMA_HOST_KEY);
+    } else {
+        store.set(OLLAMA_HOST_KEY, serde_json::json!(trimmed));
+    }
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))?;
+    Ok(resolve_ollama_host(&app))
+}
+
+/// Whether Ollama is running, and which models it has pulled - so Settings
+/// can say "running, but you have not pulled that model" rather than
+/// failing at capture time.
+#[tauri::command]
+pub async fn ollama_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> OllamaStatus {
+    let host = resolve_ollama_host(&app);
+    let url = format!("{}/api/tags", host.trim_end_matches('/'));
+    let Ok(response) = reqwest::Client::new().get(&url).send().await else {
+        return OllamaStatus {
+            running: false,
+            models: Vec::new(),
+        };
+    };
+    let models = response
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|v| v.get("models").cloned())
+        .and_then(|m| m.as_array().cloned())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    OllamaStatus {
+        running: true,
+        models,
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct OllamaStatus {
+    pub running: bool,
+    pub models: Vec<String>,
+}
+
+/// Reads the screenshot with Tesseract, then has a local model pick the
+/// fields out of the text.
+///
+/// Returns the OCR blocks like the plain Tesseract path does, so
+/// click-to-fill and learning from corrections work here too - the text was
+/// read the same way either way.
+#[tauri::command]
+pub async fn extract_with_ollama<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    image_base64: String,
+) -> Result<LocalOcrResult, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(image_base64)
+        .map_err(|e| format!("Invalid image data: {e}"))?;
+
+    let lines = crate::local_ocr::run_ocr(&bytes)?;
+    if lines.is_empty() {
+        return Ok(LocalOcrResult {
+            result: ExtractionResult::ParseFailed {
+                raw_text: String::new(),
+                error: "No text was detected in the image.".to_string(),
+            },
+            blocks: Vec::new(),
+            site: None,
+        });
+    }
+
+    let blocks: Vec<String> = lines.iter().map(|l| l.text.trim().to_string()).collect();
+    let site = crate::local_ocr::detect_site(&blocks.join("
+"));
+
+    let host = resolve_ollama_host(&app);
+    let model = resolve_model(&app, "ollama");
+    let result = extraction::extract_fields_from_text(&host, &model, &blocks.join("
+")).await?;
+
+    Ok(LocalOcrResult {
+        result,
         blocks,
         site: site.map(str::to_string),
     })

@@ -148,6 +148,83 @@ fn gemini_body(_model: &str, image_base64: &str, media_type: &str) -> serde_json
     })
 }
 
+/// Ollama takes the OCR text rather than the image.
+///
+/// Tesseract has already done the hard part - turning pixels into words -
+/// so the local model only has to work out which words are the company and
+/// which are the title. That is language, not layout, so it generalises to
+/// boards no heuristic was ever written for, and a 3B text model does it on
+/// a CPU in a second or two where a vision model would need a GPU.
+fn ollama_body(model: &str, ocr_text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "model": model,
+        "stream": false,
+        // Ollama enforces a JSON schema the same way the cloud providers do.
+        "format": field_schema(),
+        "messages": [
+            { "role": "system", "content": SYSTEM_PROMPT },
+            { "role": "user", "content": format!("{USER_PROMPT}
+
+{ocr_text}") }
+        ]
+    })
+}
+
+/// Turns text already read off a screenshot into fields, using a model
+/// running on this machine. No key, no network beyond localhost.
+pub async fn extract_fields_from_text(
+    host: &str,
+    model: &str,
+    ocr_text: &str,
+) -> Result<ExtractionResult, String> {
+    let url = format!("{}/api/chat", host.trim_end_matches('/'));
+    let response = reqwest::Client::new()
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&ollama_body(model, ocr_text))
+        .send()
+        .await
+        .map_err(|e| {
+            format!("Couldn't reach Ollama at {host}. Is it running? (`ollama serve`): {e}")
+        })?;
+
+    let status = response.status();
+    let body_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read the Ollama response: {e}"))?;
+
+    if !status.is_success() {
+        let message = error_message(&body_text);
+        // The overwhelmingly common cause, and the message Ollama gives is
+        // not obvious about the fix.
+        if message.contains("not found") {
+            return Err(format!(
+                "Ollama has no model called '{model}'. Pull it first: `ollama pull {model}`"
+            ));
+        }
+        return Err(format!("Ollama error ({status}): {message}"));
+    }
+
+    let body: serde_json::Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("Unexpected Ollama response shape: {e}"))?;
+    let raw_text = body
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .ok_or_else(|| "Ollama returned no message content.".to_string())?
+        .to_string();
+
+    let cleaned = strip_code_fences(&raw_text);
+    match serde_json::from_str::<ExtractedFields>(&cleaned) {
+        Ok(fields) => Ok(ExtractionResult::Parsed { fields }),
+        Err(err) => Ok(ExtractionResult::ParseFailed {
+            raw_text,
+            error: err.to_string(),
+        }),
+    }
+}
+
 /// Gemini's schema dialect is OpenAPI-ish rather than JSON Schema: it has
 /// no type unions, so nullability is expressed with a `nullable` flag.
 fn gemini_schema() -> serde_json::Value {
@@ -599,5 +676,28 @@ mod tests {
             "content": [{ "type": "text", "text": "{\"company\":\"Acme\"}" }]
         });
         assert_eq!(text_from_response("claude", &body).unwrap(), "{\"company\":\"Acme\"}");
+    }
+
+    #[test]
+    fn ollama_is_sent_text_and_a_schema_not_an_image() {
+        let b = ollama_body("qwen2.5:3b", "Amazon
+Robotics Engineer");
+        assert_eq!(b["model"], "qwen2.5:3b");
+        assert_eq!(b["stream"], false, "the app waits for one whole answer");
+        assert_eq!(b["messages"][0]["content"], SYSTEM_PROMPT);
+        let user = b["messages"][1]["content"].as_str().unwrap();
+        assert!(user.contains("Amazon"), "the OCR text has to reach the model");
+        assert!(user.contains("Robotics Engineer"));
+        assert!(
+            b.get("images").is_none(),
+            "a text model is given words, not pixels - Tesseract already read them"
+        );
+    }
+
+    #[test]
+    fn ollama_gets_the_same_schema_as_the_cloud_providers() {
+        let b = ollama_body("m", "text");
+        assert_eq!(b["format"], field_schema());
+        assert!(b["format"]["properties"]["company"].is_object());
     }
 }

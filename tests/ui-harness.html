@@ -77,6 +77,9 @@
       hotkeyRefuses: ["Ctrl+Alt+Delete"],
       seenWelcome: true,
       models: {},
+      ollamaHost: "http://localhost:11434",
+      // Flip running to false, or empty models, to see the other states.
+      ollama: { running: true, models: ["qwen2.5:3b"] },
       // "date|company|position" keys that have an archived capture.
       screenshots: ["2026-09-01|Amazon|Robotics SDE Intern"],
       openedScreenshots: [],
@@ -143,16 +146,17 @@
       },
       get_extraction_providers: () => [
         { id: "tesseract", label: "Tesseract - free, offline, no key", needs_key: false, key_label: "", key_placeholder: "", key_help: "", default_model: "" },
+        { id: "ollama", label: "Local model (Ollama) - free, offline", needs_key: false, key_label: "", key_placeholder: "", key_help: "", default_model: "qwen2.5:3b" },
         { id: "claude", label: "Claude (Anthropic)", needs_key: true, key_label: "Anthropic API key", key_placeholder: "sk-ant-...", key_help: "Create one at console.anthropic.com under API Keys.", default_model: "claude-sonnet-5" },
         { id: "openai", label: "ChatGPT (OpenAI)", needs_key: true, key_label: "OpenAI API key", key_placeholder: "sk-...", key_help: "Create one at platform.openai.com/api-keys.", default_model: "gpt-4o" },
         { id: "gemini", label: "Gemini (Google)", needs_key: true, key_label: "Google AI Studio API key", key_placeholder: "AIza...", key_help: "Create one at aistudio.google.com/apikey.", default_model: "gemini-2.0-flash" },
       ],
       get_model: ({ provider }) => {
-        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash" };
+        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash", ollama: "qwen2.5:3b" };
         return state.models[provider] || d[provider] || "";
       },
       set_model: ({ provider, model }) => {
-        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash" };
+        const d = { claude: "claude-sonnet-5", openai: "gpt-4o", gemini: "gemini-2.0-flash", ollama: "qwen2.5:3b" };
         if (!model.trim()) delete state.models[provider];
         else state.models[provider] = model.trim();
         return state.models[provider] || d[provider] || "";
@@ -245,6 +249,13 @@
         site: "linkedin",
       }),
       learn_ocr_hints: () => null,
+      extract_with_ollama: () => HANDLERS.extract_with_local_ocr(),
+      ollama_status: () => state.ollama,
+      get_ollama_host: () => state.ollamaHost,
+      set_ollama_host: ({ host }) => {
+        state.ollamaHost = host.trim() || "http://localhost:11434";
+        return state.ollamaHost;
+      },
       // A 1x1 PNG is enough to drive the capture path; the mocked
       // extractor ignores the bytes anyway.
       read_clipboard_image: () => state.clipboardImage,

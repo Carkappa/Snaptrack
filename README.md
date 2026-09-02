@@ -53,13 +53,26 @@ every time, so your changes are respected.
 
 ## Reading screenshots
 
-Three ways, switchable in Settings at any time:
+Four ways, switchable in Settings at any time:
 
 **Tesseract** — the default. Free, runs entirely on your machine, nothing
 leaves it. Less accurate than a model, so the full recognised text is always
 attached to the Notes field for you to check. Needs
 [Tesseract installed](https://github.com/UB-Mannheim/tesseract/wiki) — on
 Windows, tick **Add to PATH** during setup.
+
+**A local model via [Ollama](https://ollama.com)** — free, offline, no key.
+Tesseract reads the screenshot, then a model on your own machine works out
+which words are the company and which are the title. That's language rather
+than layout, so it copes with job boards no layout rule was written for.
+Needs Tesseract and Ollama installed, plus a pulled model:
+
+```bash
+ollama pull qwen2.5:3b
+```
+
+A 3B model runs on a CPU in a second or two. Settings shows whether Ollama is
+reachable and whether the model is pulled.
 
 **Claude, ChatGPT or Gemini** — meaningfully more accurate, because they read
 the page the way you would. Pick one in Settings and paste in an API key for

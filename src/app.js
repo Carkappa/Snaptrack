@@ -96,6 +96,12 @@
     apiKeyGroup: el("api-key-group"),
     apiKeyHeading: el("api-key-heading"),
     apiKeyHelp: el("api-key-help"),
+    modelGroup: el("model-group"),
+    ollamaGroup: el("ollama-group"),
+    ollamaStatus: el("ollama-status"),
+    settingsOllamaHost: el("settings-ollama-host"),
+    settingsOllamaSave: el("settings-ollama-save"),
+    settingsOllamaReset: el("settings-ollama-reset"),
     settingsModel: el("settings-model"),
     settingsModelSave: el("settings-model-save"),
     settingsModelReset: el("settings-model-reset"),
@@ -400,10 +406,16 @@
     dom.form.hidden = true;
 
     try {
-      const result =
-        currentExtractionMethod === "tesseract"
-          ? await invoke("extract_with_local_ocr", { imageBase64: base64 })
-          : await invoke("extract_from_image", { imageBase64: base64, mediaType });
+      // Tesseract and Ollama both read the page here and return the OCR
+      // blocks with the fields, so click-to-fill works for either.
+      let result;
+      if (currentExtractionMethod === "tesseract") {
+        result = await invoke("extract_with_local_ocr", { imageBase64: base64 });
+      } else if (currentExtractionMethod === "ollama") {
+        result = await invoke("extract_with_ollama", { imageBase64: base64 });
+      } else {
+        result = await invoke("extract_from_image", { imageBase64: base64, mediaType });
+      }
       dom.thumbnailStatus.textContent = "Extracted - review and save below.";
       // Only the local OCR path knows where the text sat on the page.
       currentOcrBlocks = Array.isArray(result.blocks) ? result.blocks : [];
@@ -1310,6 +1322,9 @@
       dom.extractionMethodStatus.textContent = available
         ? "Tesseract detected - screenshots are read on this machine, for free, and nothing is sent anywhere."
         : "Tesseract not found. Install it with `brew install tesseract` (macOS), your package manager (Linux), or from github.com/UB-Mannheim/tesseract/wiki (Windows) - or pick one of the cloud methods below.";
+    } else if (provider.id === "ollama") {
+      dom.extractionMethodStatus.textContent =
+        "Tesseract reads the screenshot, then a model on this machine pulls the fields out of the text. No key, nothing leaves your machine.";
     } else {
       dom.extractionMethodStatus.textContent = `Sends the screenshot to ${provider.label} for higher-accuracy extraction. Needs an API key, below.`;
     }
@@ -1331,12 +1346,72 @@
     dom.settingsApiKey.value = "";
     dom.settingsKeyMessage.hidden = true;
     await refreshApiKeyStatus();
-    await loadModel();
   }
+
+  /// Shown for anything that runs a model, key or no key.
+  async function renderModelSection() {
+    const provider = currentProvider();
+    dom.modelGroup.hidden = !provider.default_model;
+    if (provider.default_model) await loadModel();
+  }
+
+  async function renderOllamaSection() {
+    const provider = currentProvider();
+    dom.ollamaGroup.hidden = provider.id !== "ollama";
+    if (provider.id !== "ollama") return;
+    try {
+      dom.settingsOllamaHost.value = await invoke("get_ollama_host");
+    } catch (_) {
+      dom.settingsOllamaHost.value = "";
+    }
+    await refreshOllamaStatus();
+  }
+
+  async function refreshOllamaStatus() {
+    dom.ollamaStatus.textContent = "Checking…";
+    let status;
+    try {
+      status = await invoke("ollama_status");
+    } catch (e) {
+      dom.ollamaStatus.textContent = `Couldn't check Ollama: ${e}`;
+      return;
+    }
+    if (!status.running) {
+      dom.ollamaStatus.textContent =
+        "Not reachable. Install Ollama from ollama.com, then run `ollama serve`.";
+      return;
+    }
+    const wanted = dom.settingsModel.value.trim() || currentProvider().default_model;
+    // Ollama reports "qwen2.5:3b"; a model set without a tag still matches.
+    const pulled = status.models.some((m) => m === wanted || m.split(":")[0] === wanted.split(":")[0]);
+    dom.ollamaStatus.textContent = pulled
+      ? "Running, with " + wanted + " pulled. Screenshots stay on this machine."
+      : "Running, but " + wanted + " isn't pulled yet - run: ollama pull " + wanted;
+  }
+
+  dom.settingsOllamaSave.addEventListener("click", async () => {
+    try {
+      dom.settingsOllamaHost.value = await invoke("set_ollama_host", {
+        host: dom.settingsOllamaHost.value,
+      });
+      await refreshOllamaStatus();
+    } catch (e) {
+      dom.ollamaStatus.textContent = String(e);
+    }
+  });
+
+  dom.settingsOllamaReset.addEventListener("click", async () => {
+    try {
+      dom.settingsOllamaHost.value = await invoke("set_ollama_host", { host: "" });
+      await refreshOllamaStatus();
+    } catch (e) {
+      dom.ollamaStatus.textContent = String(e);
+    }
+  });
 
   async function loadModel() {
     const provider = currentProvider();
-    if (!provider.needs_key) return;
+    if (!provider.default_model) return;
     try {
       dom.settingsModel.value = await invoke("get_model", { provider: provider.id });
     } catch (_) {
@@ -1384,6 +1459,8 @@
 
     await refreshExtractionMethodStatus();
     await renderApiKeySection();
+    await renderModelSection();
+    await renderOllamaSection();
   }
 
   dom.extractionMethodSelect.addEventListener("change", async () => {
@@ -1395,6 +1472,8 @@
     }
     await refreshExtractionMethodStatus();
     await renderApiKeySection();
+    await renderModelSection();
+    await renderOllamaSection();
   });
 
   async function refreshApiKeyStatus() {

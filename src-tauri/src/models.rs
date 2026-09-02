@@ -68,6 +68,15 @@ pub fn extraction_providers() -> Vec<ExtractionProvider> {
             "",
         ),
         ExtractionProvider::new(
+            "ollama",
+            "Local model (Ollama) - free, offline",
+            false,
+            "",
+            "",
+            "",
+            "qwen2.5:3b",
+        ),
+        ExtractionProvider::new(
             "claude",
             "Claude (Anthropic)",
             true,
@@ -135,22 +144,35 @@ mod provider_tests {
                 !p.key_label.to_lowercase().contains("anthropic") || p.id == "claude",
                 "only Claude's card may mention Anthropic"
             );
+            assert_ne!(p.id, "ollama", "Ollama must never be treated as needing a key");
         }
     }
 
     #[test]
-    fn every_cloud_provider_names_a_default_model() {
+    fn every_provider_that_runs_a_model_names_a_default() {
         for p in extraction_providers() {
             if p.needs_key {
                 assert!(!p.default_model.is_empty(), "{} needs a model", p.id);
-            } else {
-                assert!(
-                    p.default_model.is_empty(),
-                    "{} runs locally and has no model to pick",
-                    p.id
-                );
             }
         }
+        assert!(
+            find_provider("tesseract").unwrap().default_model.is_empty(),
+            "Tesseract is an OCR engine, not a model - no model field for it"
+        );
+        assert!(
+            !find_provider("ollama").unwrap().default_model.is_empty(),
+            "Ollama needs a model even though it needs no key"
+        );
+    }
+
+    #[test]
+    fn ollama_is_offline_and_keyless() {
+        let p = find_provider("ollama").expect("ollama must be offered");
+        assert!(!p.needs_key, "a model on your own machine needs no API key");
+        assert!(
+            p.key_label.is_empty() && p.key_placeholder.is_empty(),
+            "and must carry no key wording for the UI to show"
+        );
     }
 
     #[test]

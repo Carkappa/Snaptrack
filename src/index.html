@@ -310,16 +310,39 @@
             <button id="settings-delete-key" class="btn btn-link">Remove stored key</button>
           </div>
           <div id="settings-key-message" class="hint" hidden></div>
+        </div>
 
-          <label for="settings-model" class="settings-sublabel">Model</label>
+        <div class="settings-group" id="model-group" hidden>
+          <h2>Model</h2>
           <div class="path-row">
             <input id="settings-model" type="text" autocomplete="off" spellcheck="false" />
             <button id="settings-model-save" class="btn btn-secondary">Save</button>
             <button id="settings-model-reset" class="btn btn-link">Default</button>
           </div>
           <p id="settings-model-message" class="hint">
-            Change this if the provider retires the model, so extraction keeps
-            working without waiting for an update. Blank goes back to the default.
+            Change this if the model is retired or you want a different one,
+            so extraction keeps working without waiting for an update. Blank
+            goes back to the default.
+          </p>
+        </div>
+
+        <div class="settings-group" id="ollama-group" hidden>
+          <h2>Ollama</h2>
+          <p id="ollama-status" class="hint">Checking&hellip;</p>
+          <label for="settings-ollama-host" class="settings-sublabel">Server</label>
+          <div class="path-row">
+            <input id="settings-ollama-host" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="http://localhost:11434" />
+            <button id="settings-ollama-save" class="btn btn-secondary">Save</button>
+            <button id="settings-ollama-reset" class="btn btn-link">Default</button>
+          </div>
+          <p class="hint">
+            Reads the screenshot with Tesseract, then has a model on your own
+            machine pull the fields out of the text - so it copes with job
+            boards no layout rule was written for, without a key and without
+            anything leaving your machine. Needs both Tesseract and
+            <a href="#" class="ext-link" data-url="https://ollama.com">Ollama</a>
+            installed, plus a pulled model.
           </p>
         </div>
 
