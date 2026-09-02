@@ -156,6 +156,7 @@ pub fn run() {
             commands::save_api_key,
             commands::delete_api_key,
             commands::test_api_key,
+            commands::list_provider_models,
             commands::extract_from_image,
             commands::get_excel_path,
             commands::set_excel_path,

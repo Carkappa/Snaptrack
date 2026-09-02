@@ -568,6 +568,53 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
     })
 }
 
+/// The models a stored key can actually reach.
+///
+/// Only providers speaking OpenAI's wire format have a listing endpoint.
+/// Returns an empty list rather than an error when there is no key or no
+/// endpoint - the Model field falls back to free text, which is what it
+/// was before.
+#[tauri::command]
+pub async fn list_provider_models(provider: String) -> Vec<String> {
+    let Some(p) = crate::models::find_provider(&provider) else {
+        return Vec::new();
+    };
+    if p.api_base.is_empty() {
+        return Vec::new();
+    }
+    let Ok(key) = keychain::get_api_key(&p.id) else {
+        return Vec::new();
+    };
+
+    let url = format!("{}/models", p.api_base.trim_end_matches('/'));
+    let Ok(response) = reqwest::Client::new()
+        .get(&url)
+        .header("authorization", format!("Bearer {key}"))
+        .send()
+        .await
+    else {
+        return Vec::new();
+    };
+    if !response.status().is_success() {
+        return Vec::new();
+    }
+
+    let mut names: Vec<String> = response
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|v| v.get("data").cloned())
+        .and_then(|d| d.as_array().cloned())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
 /// Checks a stored key against the provider, without a screenshot.
 ///
 /// A failed capture cannot tell you whether the key is wrong, the model is

@@ -323,6 +323,12 @@
         state.ollamaUnload = enabled;
         return null;
       },
+      list_provider_models: ({ provider }) => {
+        if (!state.apiKeys[provider]) return [];
+        return provider === "tamu"
+          ? ["protected.Claude Opus 4.6", "protected.Claude Sonnet 4.6", "protected.gpt-4o", "protected.o3"]
+          : ["gpt-4o", "gpt-4.1"];
+      },
       test_api_key: ({ provider }) => {
         if (!state.apiKeys[provider]) throw new Error(`No key stored for ${provider} yet.`);
         return `Key works. 6 models available, including: protected.gpt-4o.`;

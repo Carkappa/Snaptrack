@@ -1439,12 +1439,15 @@ ${e}`;
             /* fall back to the shipped default */
           }
         }
+        // Only asked for when a key is stored; without one it returns
+        // nothing and the field stays free text.
+        const available = stored ? await invoke("list_provider_models", { provider: p.id }) : [];
         const role = i === 0 ? "your chosen method" : `fallback ${i}`;
         return `<div class="settings-group provider-card" data-provider="${escapeHtml(p.id)}">
           <h2>${escapeHtml(p.needs_key ? p.key_label : p.label)}</h2>
           <p class="hint">For ${escapeHtml(p.label)} - ${escapeHtml(role)}.</p>
           ${p.needs_key ? keyBlock(p, stored) : ""}
-          ${p.default_model ? modelBlock(p, model) : ""}
+          ${p.default_model ? modelBlock(p, model, available) : ""}
           <p class="card-message hint" hidden></p>
         </div>`;
       })
@@ -1481,10 +1484,19 @@ ${e}`;
     </div>`;
   }
 
-  function modelBlock(p, model) {
-    return `<label class="settings-sublabel">Model</label>
+  /// A datalist rather than a dropdown: the list is what the key can
+  /// actually reach, and typing still works for anything not in it.
+  /// Guessing at a name like "protected.Claude Sonnet 4.6" is otherwise a
+  /// coin flip, and getting it wrong reads as a broken key.
+  function modelBlock(p, model, available) {
+    const listId = `models-${p.id}`;
+    const options = (available || [])
+      .map((m) => `<option value="${escapeHtml(m)}"></option>`)
+      .join("");
+    return `<label class="settings-sublabel">Model${available && available.length ? ` - ${available.length} available` : ""}</label>
       <div class="path-row">
-        <input type="text" class="model-input" value="${escapeHtml(model)}" placeholder="${escapeHtml(p.default_model)}" autocomplete="off" spellcheck="false" />
+        <input type="text" class="model-input" list="${listId}" value="${escapeHtml(model)}" placeholder="${escapeHtml(p.default_model)}" autocomplete="off" spellcheck="false" />
+        <datalist id="${listId}">${options}</datalist>
         <button type="button" class="btn btn-secondary btn-small" data-act="save-model">Save</button>
         <button type="button" class="btn btn-link btn-small" data-act="reset-model">Default</button>
       </div>`;
