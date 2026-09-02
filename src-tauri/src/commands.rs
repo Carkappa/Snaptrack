@@ -181,9 +181,23 @@ pub async fn extract_from_image<R: tauri::Runtime>(
     image_base64: String,
     media_type: String,
 ) -> Result<ExtractionResult, String> {
-    let app_for_model = app.clone();
-    let method = get_extraction_method(app)?;
-    let provider = crate::models::provider_or_default(&method);
+    let method = get_extraction_method(app.clone())?;
+    run_cloud(&app, &method, &image_base64, &media_type).await
+}
+
+/// Runs one named cloud provider.
+///
+/// Takes the provider rather than reading the stored method, because the
+/// fallback chain needs to run one that is not the stored method. Reading
+/// it here meant a cloud fallback silently re-ran the primary with the
+/// primary's key and reported the failure under the fallback's name.
+async fn run_cloud<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    method: &str,
+    image_base64: &str,
+    media_type: &str,
+) -> Result<ExtractionResult, String> {
+    let provider = crate::models::provider_or_default(method);
     if !provider.needs_key {
         return Err(format!(
             "{} does not use an API key - this command is for the cloud providers.",
@@ -191,13 +205,13 @@ pub async fn extract_from_image<R: tauri::Runtime>(
         ));
     }
     let api_key = keychain::get_api_key(&provider.id)?;
-    let model = resolve_model(&app_for_model, &provider.id);
+    let model = resolve_model(app, &provider.id);
     extraction::extract_fields_from_image(
         &provider.id,
         &model,
         &api_key,
-        &image_base64,
-        &media_type,
+        image_base64,
+        media_type,
         &provider.api_base,
     )
     .await
@@ -1769,12 +1783,8 @@ async fn run_one<R: tauri::Runtime>(
         "tesseract" => extract_with_local_ocr(app.clone(), image_base64.to_string()),
         "ollama" => extract_with_ollama(app.clone(), image_base64.to_string()).await,
         _ => {
-            let result = extract_from_image(
-                app.clone(),
-                image_base64.to_string(),
-                media_type.to_string(),
-            )
-            .await?;
+            // By name, so a fallback runs itself rather than the primary.
+            let result = run_cloud(app, provider, image_base64, media_type).await?;
             // A cloud model reads the image itself, so there are no OCR
             // blocks to offer for click-to-fill.
             Ok(LocalOcrResult {

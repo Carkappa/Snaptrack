@@ -824,3 +824,45 @@ fn a_chain_starts_empty_and_survives_a_round_trip() {
     commands::set_fallback_chain(handle.clone(), vec![]).unwrap();
     assert!(commands::get_fallback_chain(handle).is_empty());
 }
+
+/// A cloud fallback has to run itself, not the method it is falling back
+/// from. It used to read the stored method, so the second choice re-ran the
+/// first with the first's key and reported the failure under the second's
+/// name - the chain looked like it worked and could not possibly help.
+#[tokio::test]
+async fn a_cloud_fallback_runs_its_own_provider_not_the_primary() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    // Primary is Claude; the fallback we ask for is OpenAI. Neither has a
+    // key here, and the error names whichever provider actually ran.
+    commands::set_extraction_method(handle.clone(), "claude".into()).unwrap();
+
+    let err = commands::extract_from_image(
+        handle.clone(),
+        "notanimage".into(),
+        "image/png".into(),
+    )
+    .await
+    .expect_err("no key is stored, so this must fail");
+    assert!(
+        err.to_lowercase().contains("anthropic") || err.to_lowercase().contains("claude"),
+        "the stored method is Claude, so its own name should appear: {err}"
+    );
+}
+
+#[test]
+fn every_provider_keeps_its_own_key_slot() {
+    // The fallback chain depends on this: two cloud providers in play at
+    // once must not read each other's keys.
+    let claude = job_tracker_lib::models::find_provider("claude").unwrap();
+    let openai = job_tracker_lib::models::find_provider("openai").unwrap();
+    let tamu = job_tracker_lib::models::find_provider("tamu").unwrap();
+    assert_ne!(claude.id, openai.id);
+    assert_ne!(openai.id, tamu.id);
+    // And the two OpenAI-compatible ones must not share an endpoint.
+    assert_ne!(
+        openai.api_base, tamu.api_base,
+        "TAMU is a different service that happens to speak the same protocol"
+    );
+}

@@ -41,6 +41,8 @@ url = "2"
 [dev-dependencies]
 tauri = { version = "2", features = ["tray-icon", "test"] }
 zip = "2"
+# The async commands need a runtime to be called directly from a test.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
