@@ -61,7 +61,7 @@ fn full_capture_to_excel_pipeline() {
 
     // Status dropdown source of truth.
     assert_eq!(
-        commands::get_statuses(),
+        commands::get_statuses(handle.clone()),
         vec!["Applied", "Interviewing", "Offered", "Rejected", "Ghosted", "Withdrawn"]
     );
 
@@ -339,4 +339,175 @@ fn deleting_refuses_when_the_row_is_not_the_one_the_user_saw() {
     )
     .expect_err("an out-of-range index must be refused");
     assert!(err.contains("no longer exists"), "unexpected error: {err}");
+}
+
+/// The status list is user-editable, and rows already carrying a status that
+/// was removed must survive it - the workbook is the user's record.
+#[test]
+fn editing_the_status_list_leaves_existing_rows_alone() {
+    use job_tracker_lib::models::{StatusDef, StatusKind};
+
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    let dir = temp_dir_for("statuses");
+    let xlsx_path = dir.join("Statuses.xlsx");
+    let _ = std::fs::remove_file(&xlsx_path);
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string()).unwrap();
+
+    let mut row = amazon_application();
+    row.status = "Ghosted".into();
+    commands::save_application(handle.clone(), row, false).unwrap();
+
+    // Replace the list with something narrower that drops "Ghosted".
+    let custom = vec![
+        StatusDef::new("Applied", StatusKind::Waiting),
+        StatusDef::new("Phone screen", StatusKind::Replied),
+        StatusDef::new("Offered", StatusKind::Replied),
+    ];
+    let saved = commands::set_status_defs(handle.clone(), custom.clone())
+        .expect("a valid list should be accepted");
+    assert_eq!(saved, custom);
+    assert_eq!(
+        commands::get_statuses(handle.clone()),
+        vec!["Applied", "Phone screen", "Offered"]
+    );
+
+    let rows = commands::list_applications(handle.clone()).unwrap();
+    assert_eq!(
+        rows[0].status, "Ghosted",
+        "a row keeps a status the list no longer offers"
+    );
+
+    // A save after the change must still work, and must not rewrite that row.
+    let mut second = amazon_application();
+    second.company = "Stripe".into();
+    second.status = "Phone screen".into();
+    commands::save_application(handle.clone(), second, false).unwrap();
+    let rows = commands::list_applications(handle.clone()).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].status, "Ghosted");
+    assert_eq!(rows[1].status, "Phone screen");
+}
+
+#[test]
+fn an_unusable_status_list_is_refused() {
+    use job_tracker_lib::models::{StatusDef, StatusKind};
+
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    assert!(commands::set_status_defs(handle.clone(), vec![]).is_err());
+    assert!(commands::set_status_defs(
+        handle.clone(),
+        vec![StatusDef::new("   ", StatusKind::Waiting)]
+    )
+    .is_err());
+
+    // A refused edit must leave the previous list in place.
+    assert_eq!(
+        commands::get_statuses(handle.clone()),
+        vec!["Applied", "Interviewing", "Offered", "Rejected", "Ghosted", "Withdrawn"]
+    );
+}
+
+/// Undo after a delete puts the row back where it was.
+#[test]
+fn a_deleted_row_can_be_put_back() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    let dir = temp_dir_for("undo");
+    let xlsx_path = dir.join("Undo.xlsx");
+    let _ = std::fs::remove_file(&xlsx_path);
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string()).unwrap();
+
+    let mut second = amazon_application();
+    second.company = "Stripe".into();
+    let mut third = amazon_application();
+    third.company = "Figma".into();
+    for row in [amazon_application(), second, third] {
+        commands::save_application(handle.clone(), row, false).unwrap();
+    }
+
+    let removed = commands::list_applications(handle.clone()).unwrap()[1].clone();
+    commands::delete_application_at_index(handle.clone(), 1, removed.company.clone(), removed.position.clone())
+        .unwrap();
+    assert_eq!(commands::list_applications(handle.clone()).unwrap().len(), 2);
+
+    commands::insert_application_at_index(handle.clone(), 1, removed.clone()).unwrap();
+    let rows = commands::list_applications(handle.clone()).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[1].company, "Stripe", "it goes back where it was");
+    assert_eq!(rows[0].company, "Amazon");
+    assert_eq!(rows[2].company, "Figma");
+
+    // An index past the end lands at the end rather than failing - by the
+    // time Undo is clicked the workbook may have fewer rows than before.
+    commands::insert_application_at_index(handle.clone(), 99, removed).unwrap();
+    let rows = commands::list_applications(handle.clone()).unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[3].company, "Stripe");
+}
+
+/// Importing merges another workbook without touching it or duplicating.
+#[test]
+fn importing_merges_and_skips_duplicates() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    let dir = temp_dir_for("import");
+    let target = dir.join("Target.xlsx");
+    let source = dir.join("Source.xlsx");
+    let _ = std::fs::remove_file(&target);
+    let _ = std::fs::remove_file(&source);
+
+    // Build the source workbook through the same commands, then point the
+    // app back at its own workbook.
+    commands::set_excel_path(handle.clone(), source.to_string_lossy().to_string()).unwrap();
+    let mut shared = amazon_application();
+    shared.company = "Amazon".into();
+    let mut only_in_source = amazon_application();
+    only_in_source.company = "Datadog".into();
+    only_in_source.position = "SRE".into();
+    for row in [shared.clone(), only_in_source] {
+        commands::save_application(handle.clone(), row, false).unwrap();
+    }
+
+    commands::set_excel_path(handle.clone(), target.to_string_lossy().to_string()).unwrap();
+    commands::save_application(handle.clone(), shared, false).unwrap();
+
+    let summary = commands::import_applications(handle.clone(), source.to_string_lossy().to_string())
+        .expect("import should succeed");
+    assert_eq!(summary.imported, 1, "only the row we did not already have");
+    assert_eq!(summary.skipped_duplicates, 1);
+
+    let rows = commands::list_applications(handle.clone()).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().any(|r| r.company == "Datadog"));
+
+    // The source file must be left exactly as it was.
+    commands::set_excel_path(handle.clone(), source.to_string_lossy().to_string()).unwrap();
+    assert_eq!(
+        commands::list_applications(handle.clone()).unwrap().len(),
+        2,
+        "importing must not modify the file it read from"
+    );
+}
+
+#[test]
+fn importing_the_workbook_you_are_already_using_is_refused() {
+    let app = build_test_app();
+    let handle = app.handle().clone();
+
+    let dir = temp_dir_for("import-self");
+    let path = dir.join("Self.xlsx");
+    let _ = std::fs::remove_file(&path);
+    commands::set_excel_path(handle.clone(), path.to_string_lossy().to_string()).unwrap();
+    commands::save_application(handle.clone(), amazon_application(), false).unwrap();
+
+    let err = commands::import_applications(handle.clone(), path.to_string_lossy().to_string())
+        .expect_err("importing the active workbook into itself must be refused");
+    assert!(err.contains("already tracking"), "unexpected error: {err}");
+    assert_eq!(commands::list_applications(handle.clone()).unwrap().len(), 1);
 }

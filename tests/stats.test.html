@@ -66,7 +66,7 @@
           "Applied", "Applied", "Interviewing", "Offered", "Rejected", "Ghosted", "Withdrawn",
         ]));
         eq(b.total, 7);
-        eq(b.segments.map((s) => s.status), stats.STATUS_ORDER);
+        eq(b.segments.map((s) => s.status), stats.namesOf(stats.DEFAULT_STATUS_DEFS));
         eq(b.segments.map((s) => s.count), [2, 1, 1, 1, 1, 1]);
       });
 
@@ -93,7 +93,7 @@
         );
         eq(
           b.segments.slice(0, 6).map((s) => s.status),
-          stats.STATUS_ORDER,
+          stats.namesOf(stats.DEFAULT_STATUS_DEFS),
           "known statuses stay first, in order"
         );
       });
@@ -148,6 +148,63 @@
           eq(r.rate, 0);
           ok(!Number.isNaN(r.rate), "must not be NaN");
         }
+      });
+
+      // ---- an editable status list ----
+
+      test("statusBreakdown follows a custom list's order", () => {
+        const custom = [
+          { name: "Applied", kind: "waiting" },
+          { name: "Phone screen", kind: "replied" },
+          { name: "Offered", kind: "replied" },
+        ];
+        const b = stats.statusBreakdown(apps(["Phone screen", "Applied", "Offered"]), custom);
+        eq(b.segments.map((s) => s.status), ["Applied", "Phone screen", "Offered"]);
+        eq(b.segments.map((s) => s.count), [1, 1, 1]);
+      });
+
+      test("a status dropped from the list still shows, after the listed ones", () => {
+        const custom = [{ name: "Applied", kind: "waiting" }];
+        const b = stats.statusBreakdown(apps(["Applied", "Ghosted"]), custom);
+        eq(b.segments.map((s) => s.status), ["Applied", "Ghosted"]);
+        eq(b.segments.find((s) => s.status === "Ghosted").known, false);
+        eq(b.total, 2, "the removed status still counts toward the total");
+      });
+
+      test("responseRate uses the kinds the user set, not the names", () => {
+        const custom = [
+          { name: "Sent", kind: "waiting" },
+          { name: "Phone screen", kind: "replied" },
+          { name: "Abandoned", kind: "closed" },
+        ];
+        const r = stats.responseRate(apps(["Sent", "Phone screen", "Abandoned"]), custom);
+        eq(r.considered, 2, "the closed one is left out of the ratio");
+        eq(r.responded, 1);
+        close(r.rate, 0.5);
+      });
+
+      test("a status missing from the list counts as still waiting", () => {
+        // Dropping it instead would quietly inflate the rate.
+        const custom = [{ name: "Offered", kind: "replied" }];
+        const r = stats.responseRate(apps(["Offered", "Some old status"]), custom);
+        eq(r.considered, 2);
+        eq(r.responded, 1);
+        close(r.rate, 0.5);
+      });
+
+      test("namesOf falls back to the defaults for an empty list", () => {
+        eq(stats.namesOf([]), stats.namesOf(stats.DEFAULT_STATUS_DEFS));
+        eq(stats.namesOf(undefined).length, 6);
+        eq(stats.namesOf([{ name: "Only", kind: "waiting" }]), ["Only"]);
+      });
+
+      test("the built-in defaults still describe the six original statuses", () => {
+        eq(stats.DEFAULT_STATUS_DEFS.length, 6);
+        eq(
+          stats.DEFAULT_STATUS_DEFS.filter((d) => d.kind === "replied").map((d) => d.name),
+          ["Interviewing", "Offered", "Rejected"]
+        );
+        eq(stats.DEFAULT_STATUS_DEFS.find((d) => d.name === "Withdrawn").kind, "closed");
       });
 
       // ---- donutSegments ----

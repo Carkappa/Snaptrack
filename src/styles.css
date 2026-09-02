@@ -802,6 +802,41 @@ main {
   gap: 3px;
 }
 
+.list-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+  min-height: 20px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--control-secondary);
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.filter-chip:hover {
+  background: rgba(120, 120, 128, 0.22);
+}
+
+.filter-chip-clear {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.filter-chip:hover .filter-chip-clear {
+  color: var(--fg);
+}
+
 .detail-row {
   display: grid;
   grid-template-columns: 9px minmax(64px, max-content) 1fr auto auto;
@@ -813,6 +848,32 @@ main {
 
 .detail-row.muted {
   opacity: 0.45;
+}
+
+/* The breakdown rows are buttons that narrow the list below. */
+button.detail-row {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 1px 4px;
+  margin: 0 -4px;
+  border-radius: 5px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+button.detail-row:hover:not(.muted) {
+  background: var(--control-secondary);
+}
+
+button.detail-row.muted {
+  cursor: default;
+}
+
+button.detail-row.active {
+  background: var(--accent-soft);
+  opacity: 1;
 }
 
 .detail-chip {
@@ -1372,6 +1433,81 @@ main {
 
 .checkbox-row span {
   cursor: pointer;
+}
+
+/* ---------- Status editor ---------- */
+
+.status-edit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.status-edit-row {
+  display: grid;
+  grid-template-columns: 1fr 130px auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.status-edit-row input,
+.status-edit-row select {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.status-remove {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+
+.status-remove:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* Colours for statuses the user invented, beyond the built-in six. */
+.st-x1 { background: #5e5ce6; }
+.st-x2 { background: #ff375f; }
+.st-x3 { background: #ffd60a; }
+.st-x4 { background: #00c7be; }
+.st-x5 { background: #ac8e68; }
+
+.donut-arc.st-x1 { stroke: #5e5ce6; background: none; }
+.donut-arc.st-x2 { stroke: #ff375f; background: none; }
+.donut-arc.st-x3 { stroke: #ffd60a; background: none; }
+.donut-arc.st-x4 { stroke: #00c7be; background: none; }
+.donut-arc.st-x5 { stroke: #ac8e68; background: none; }
+
+/* ---------- Undo toast ---------- */
+
+.undo-toast {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--separator);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  z-index: 49;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.undo-toast span {
+  flex: 1;
 }
 
 /* ---------- Retry toast ---------- */

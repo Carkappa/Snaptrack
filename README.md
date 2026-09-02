@@ -152,10 +152,12 @@ scripts/set-version.sh  Bumps the version everywhere it appears, from one comman
 src/                    Frontend — plain index.html + styles.css + app.js
     calendar.js           Date math + month/year aggregation behind the Calendar tab
     stats.js              Status breakdown, response rate, donut arcs (Applications tab)
+    format.js             HTML/attribute escaping for everything rendered
 CLAUDE.md               Repo conventions and traps, for anyone (or anything) editing it
 tests/                  Browser-run frontend tests (no npm, no runner)
   calendar.test.html     Pure-logic tests for src/calendar.js
   stats.test.html        Pure-logic tests for src/stats.js
+  format.test.html       Escaping tests, including the attribute-injection shapes
   ui-harness.html        The real UI with the Tauri bridge mocked, for clicking through
 .github/workflows/      CI: Rust + frontend tests on every push, installers on a tag
 ```
@@ -292,6 +294,19 @@ Change the path from the Settings tab at any time.
 - **Overview panel.** Above the list: a donut of where every application
   stands, your response rate, and a breakdown of each status with a bar
   and a share. Collapsible — click the heading — and it remembers.
+  **Click a status** in it to narrow the list to those applications.
+- **Search across the row.** Company, role, location, job ID, and notes —
+  which with Tesseract holds the whole raw OCR text of the posting.
+- **Undo a delete.** The toast after a delete puts the row back exactly
+  where it was, with every field.
+- **Import another workbook.** Settings → Import merges a second `.xlsx`
+  in. Anything whose company and role you already track is skipped, and
+  the file you import from is never modified.
+- **Edit the status list.** Settings → Statuses. Rename, add, remove, and
+  say what each one means: an answer of any kind ("They replied"), still
+  waiting, or closed by you — which is what keeps the response rate
+  honest once you invent your own. Removing a status leaves applications
+  already using it untouched.
 - **CSV export.** One click in the Applications tab writes a sibling
   `JobApplications.csv` next to the workbook.
 - **Openable links.** The `link` cell in the Applications table opens the

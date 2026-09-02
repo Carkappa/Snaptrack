@@ -194,7 +194,11 @@ fn status_fill(status: &str) -> Option<Color> {
 /// up and a clear, retry-able error is returned - `rows` is never
 /// consumed by this function's caller until it returns Ok, so the
 /// caller can simply retry the same save.
-pub fn write_applications(path: &Path, rows: &[JobApplication]) -> Result<(), String> {
+pub fn write_applications(
+    path: &Path,
+    rows: &[JobApplication],
+    statuses: &[String],
+) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)
@@ -304,12 +308,22 @@ pub fn write_applications(path: &Path, rows: &[JobApplication]) -> Result<(), St
     worksheet.autofit();
 
     let last_validation_row = (rows.len() as u32) + VALIDATION_BUFFER_ROWS;
-    let status_validation = DataValidation::new()
-        .allow_list_strings(&crate::models::STATUSES)
-        .map_err(|e| format!("Could not build status dropdown: {e}"))?;
-    worksheet
-        .add_data_validation(1, 7, last_validation_row, 7, &status_validation)
-        .map_err(|e| format!("Could not attach status dropdown: {e}"))?;
+
+    // Excel caps an inline validation list at 255 characters including the
+    // separators. The six defaults are nowhere near it, but the list is
+    // user-editable now, so an over-long one drops the dropdown rather than
+    // producing a workbook Excel refuses to open.
+    let validation_list: Vec<&str> = statuses.iter().map(String::as_str).collect();
+    let validation_fits = validation_list.iter().map(|s| s.len() + 1).sum::<usize>() <= 255;
+
+    if validation_fits && !validation_list.is_empty() {
+        let status_validation = DataValidation::new()
+            .allow_list_strings(&validation_list)
+            .map_err(|e| format!("Could not build status dropdown: {e}"))?;
+        worksheet
+            .add_data_validation(1, 7, last_validation_row, 7, &status_validation)
+            .map_err(|e| format!("Could not attach status dropdown: {e}"))?;
+    }
 
     let tmp_path = temp_path_for(path);
     workbook
@@ -415,6 +429,13 @@ mod tests {
     use super::*;
     use crate::models::JobApplication;
 
+    fn default_statuses() -> Vec<String> {
+        crate::models::default_status_defs()
+            .into_iter()
+            .map(|d| d.name)
+            .collect()
+    }
+
     fn sample_app(company: &str, position: &str, status: &str) -> JobApplication {
         JobApplication {
             date_applied: "2026-09-01".to_string(),
@@ -442,7 +463,7 @@ mod tests {
             sample_app("Acme", "Engineer", "Applied"),
             sample_app("Globex", "Designer", "Interviewing"),
         ];
-        write_applications(&path, &rows).expect("write should succeed");
+        write_applications(&path, &rows, &default_statuses()).expect("write should succeed");
 
         let read_back = read_applications(&path).expect("read should succeed");
         assert_eq!(read_back.len(), 2);
@@ -474,7 +495,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("atomic.xlsx");
 
-        write_applications(&path, &[sample_app("Acme", "Engineer", "Applied")]).unwrap();
+        write_applications(&path, &[sample_app("Acme", "Engineer", "Applied")], &default_statuses()).unwrap();
         assert!(path.exists());
         assert!(!temp_path_for(&path).exists());
 
@@ -487,11 +508,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("Applications.xlsx");
 
-        write_applications(&path, &[sample_app("Acme", "Engineer", "Applied")]).unwrap();
+        write_applications(&path, &[sample_app("Acme", "Engineer", "Applied")], &default_statuses()).unwrap();
         let backups_dir = dir.join("backups");
         assert!(!backups_dir.exists(), "first write has nothing to back up yet");
 
-        write_applications(&path, &[sample_app("Acme", "Engineer", "Interviewing")]).unwrap();
+        write_applications(&path, &[sample_app("Acme", "Engineer", "Interviewing")], &default_statuses()).unwrap();
         assert!(backups_dir.exists());
         let backup_files: Vec<_> = std::fs::read_dir(&backups_dir).unwrap().collect();
         assert_eq!(backup_files.len(), 1, "second write should back up the first version");

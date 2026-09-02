@@ -1,4 +1,4 @@
-use crate::models::{ExtractionResult, JobApplication, SaveResult};
+use crate::models::{ExtractionResult, JobApplication, SaveResult, StatusDef};
 use crate::updates::UpdateCheck;
 use crate::{excel, extraction, keychain, updates};
 use base64::Engine;
@@ -10,6 +10,7 @@ const STORE_FILE: &str = "settings.json";
 const EXCEL_PATH_KEY: &str = "excel_path";
 const EXTRACTION_METHOD_KEY: &str = "extraction_method";
 const DEFAULT_EXTRACTION_METHOD: &str = "tesseract";
+const STATUS_DEFS_KEY: &str = "status_defs";
 const UPDATE_CHECK_ENABLED_KEY: &str = "update_check_enabled";
 const AUTO_INSTALL_UPDATES_KEY: &str = "auto_install_updates";
 const LAST_UPDATE_CHECK_KEY: &str = "last_update_check";
@@ -37,9 +38,58 @@ fn resolve_excel_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<Pa
     }
 }
 
+/// The user's status list, falling back to the built-in six. A stored list
+/// that no longer parses (hand-edited settings file, an older shape) is
+/// ignored rather than fatal - the app still has to open.
+fn resolve_status_defs<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<StatusDef> {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(STATUS_DEFS_KEY))
+        .and_then(|value| serde_json::from_value::<Vec<StatusDef>>(value).ok())
+        .and_then(|defs| crate::models::sanitize_status_defs(defs).ok())
+        .unwrap_or_else(crate::models::default_status_defs)
+}
+
+fn status_names<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Vec<String> {
+    resolve_status_defs(app)
+        .into_iter()
+        .map(|d| d.name)
+        .collect()
+}
+
 #[tauri::command]
-pub fn get_statuses() -> Vec<&'static str> {
-    crate::models::STATUSES.to_vec()
+pub fn get_statuses<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<String> {
+    status_names(&app)
+}
+
+#[tauri::command]
+pub fn get_status_defs<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Vec<StatusDef> {
+    resolve_status_defs(&app)
+}
+
+/// Replaces the status list.
+///
+/// Rows already carrying a status that has just been removed are left
+/// exactly as they are - the workbook is the user's record, and silently
+/// rewriting their history to fit a settings change would be worse than
+/// showing a status that is no longer offered for new entries.
+#[tauri::command]
+pub fn set_status_defs<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    defs: Vec<StatusDef>,
+) -> Result<Vec<StatusDef>, String> {
+    let cleaned = crate::models::sanitize_status_defs(defs)?;
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    store.set(
+        STATUS_DEFS_KEY,
+        serde_json::to_value(&cleaned).map_err(|e| e.to_string())?,
+    );
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))?;
+    Ok(cleaned)
 }
 
 #[tauri::command]
@@ -256,7 +306,7 @@ pub fn save_application<R: tauri::Runtime>(
     }
 
     rows.push(application);
-    excel::write_applications(&path, &rows)?;
+    excel::write_applications(&path, &rows, &status_names(&app))?;
     Ok(SaveResult::Saved)
 }
 
@@ -286,7 +336,7 @@ pub fn update_existing_status<R: tauri::Runtime>(
         return Err("Could not find a matching existing row to update.".to_string());
     }
 
-    excel::write_applications(&path, &rows)
+    excel::write_applications(&path, &rows, &status_names(&app))
 }
 
 #[tauri::command]
@@ -304,7 +354,7 @@ pub fn update_status_at_index<R: tauri::Runtime>(
     row.status = status;
     row.last_updated = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-    excel::write_applications(&path, &rows)
+    excel::write_applications(&path, &rows, &status_names(&app))
 }
 
 /// Overwrites a row in place (edit flow from the Applications list),
@@ -323,7 +373,7 @@ pub fn update_application_at_index<R: tauri::Runtime>(
         .ok_or_else(|| "That row no longer exists - reload the list and try again.".to_string())?;
     *row = application;
 
-    excel::write_applications(&path, &rows)
+    excel::write_applications(&path, &rows, &status_names(&app))
 }
 
 /// Removes a row.
@@ -361,7 +411,99 @@ pub fn delete_application_at_index<R: tauri::Runtime>(
     }
 
     rows.remove(index);
-    excel::write_applications(&path, &rows)
+    excel::write_applications(&path, &rows, &status_names(&app))
+}
+
+/// Puts a row back where it was, undoing a delete.
+///
+/// The index is clamped rather than rejected: by the time someone clicks
+/// Undo the workbook may legitimately have fewer rows than it did (another
+/// delete, an edit in Excel), and refusing to restore their application
+/// because its old position no longer exists would be the wrong call. Worst
+/// case it lands at the end, which the user can see and re-sort.
+#[tauri::command]
+pub fn insert_application_at_index<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    index: usize,
+    application: JobApplication,
+) -> Result<(), String> {
+    let path = resolve_excel_path(&app)?;
+    let mut rows = excel::read_applications(&path)?;
+
+    let at = index.min(rows.len());
+    rows.insert(at, application);
+    excel::write_applications(&path, &rows, &status_names(&app))
+}
+
+/// Merges the rows of another `.xlsx` into the current workbook.
+///
+/// Anything whose company+position already exists here is skipped rather
+/// than duplicated, and rows with neither a company nor a position (blank
+/// or junk lines) are counted out. Nothing in the source file is modified.
+#[tauri::command]
+pub fn import_applications<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<ImportSummary, String> {
+    let source = PathBuf::from(&path);
+    if !source.exists() {
+        return Err(format!("'{path}' no longer exists."));
+    }
+    let target_path = resolve_excel_path(&app)?;
+    if source == target_path {
+        return Err("That is the workbook you are already tracking in.".to_string());
+    }
+
+    let incoming = excel::read_applications(&source)?;
+    let mut rows = excel::read_applications(&target_path)?;
+
+    let mut existing: std::collections::HashSet<(String, String)> =
+        rows.iter().map(|r| r.dedupe_key()).collect();
+
+    let mut summary = ImportSummary::default();
+    for mut candidate in incoming {
+        if candidate.company.trim().is_empty() && candidate.position.trim().is_empty() {
+            summary.skipped_blank += 1;
+            continue;
+        }
+        if !existing.insert(candidate.dedupe_key()) {
+            summary.skipped_duplicates += 1;
+            continue;
+        }
+        if candidate.status.trim().is_empty() {
+            candidate.status = "Applied".to_string();
+        }
+        rows.push(candidate);
+        summary.imported += 1;
+    }
+
+    if summary.imported > 0 {
+        excel::write_applications(&target_path, &rows, &status_names(&app))?;
+    }
+    Ok(summary)
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+pub struct ImportSummary {
+    pub imported: usize,
+    pub skipped_duplicates: usize,
+    pub skipped_blank: usize,
+}
+
+#[tauri::command]
+pub async fn pick_import_file<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .add_filter("Excel Workbook", &["xlsx"])
+        .pick_file(move |file_path| {
+            let _ = tx.send(file_path);
+        });
+    let result = rx.recv().map_err(|e| format!("File dialog failed: {e}"))?;
+    Ok(result.map(|p| p.to_string()))
 }
 
 #[tauri::command]

@@ -154,7 +154,7 @@
       <!-- LIST TAB -->
       <section id="tab-list" class="tab-panel">
         <div class="list-toolbar">
-          <input id="search-box" type="search" placeholder="Search company or position&hellip;" />
+          <input id="search-box" type="search" placeholder="Search company, role, location, notes&hellip;" />
           <button id="export-csv-btn" class="btn btn-secondary btn-small">Export CSV</button>
         </div>
         <!-- Summary panel: hero metric, then labelled sections of dense
@@ -197,7 +197,14 @@
           </div>
         </section>
 
-        <div id="list-status" class="list-status">Loading&hellip;</div>
+        <div class="list-status-row">
+          <span id="list-status" class="list-status">Loading&hellip;</span>
+          <button type="button" id="filter-chip" class="filter-chip" hidden>
+            <i id="filter-chip-dot" class="detail-chip"></i>
+            <span id="filter-chip-label"></span>
+            <span id="filter-chip-clear" class="filter-chip-clear" aria-label="Clear filter">&times;</span>
+          </button>
+        </div>
         <p class="hint">Click a row to edit it, a heading to sort by it, or &times; to delete it.</p>
         <div class="table-scroll">
           <table id="applications-table">
@@ -323,11 +330,45 @@
         </div>
 
         <div class="settings-group">
+          <h2>Statuses</h2>
+          <p class="hint">
+            What each one means decides the response rate: an answer of any
+            kind counts as a reply, and anything you closed yourself is left
+            out of the ratio. Removing a status doesn't change applications
+            already using it.
+          </p>
+          <div id="settings-status-list" class="status-edit-list"></div>
+          <div class="settings-actions">
+            <button id="settings-status-add" class="btn btn-secondary">Add a status</button>
+          </div>
+          <div id="settings-status-message" class="error-text" hidden></div>
+        </div>
+
+        <div class="settings-group">
+          <h2>Import</h2>
+          <p class="hint">
+            Merges another <code>.xlsx</code> into this one. Anything whose
+            company and role you already track is skipped, and the file you
+            import from is never modified.
+          </p>
+          <div class="settings-actions">
+            <button id="settings-import" class="btn btn-secondary">Import a workbook&hellip;</button>
+          </div>
+          <div id="settings-import-message" class="hint" hidden></div>
+        </div>
+
+        <div class="settings-group">
           <h2>Global hotkey</h2>
           <p class="hint"><kbd id="settings-hotkey">Cmd+Shift+J</kbd> shows this window from anywhere.</p>
         </div>
       </section>
     </main>
+  </div>
+
+  <div id="undo-toast" class="undo-toast" hidden>
+    <span id="undo-message"></span>
+    <button id="undo-btn" class="btn btn-primary btn-small">Undo</button>
+    <button id="undo-dismiss" class="btn btn-link btn-small">Dismiss</button>
   </div>
 
   <div id="retry-toast" class="retry-toast" hidden>

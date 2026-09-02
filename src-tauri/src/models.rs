@@ -11,6 +11,134 @@ pub const STATUSES: [&str; 6] = [
     "Withdrawn",
 ];
 
+/// A status the user can apply to an application.
+///
+/// `kind` is what keeps the response-rate figure meaningful once the list is
+/// editable. The app cannot guess whether a status someone invented ("Phone
+/// screen", "Take-home") means the employer replied, so it is recorded
+/// rather than inferred from the name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusKind {
+    /// Sent, nothing back yet. Counts against the response rate.
+    Waiting,
+    /// They answered - an interview, an offer, or a rejection. A rejection
+    /// is still an answer.
+    Replied,
+    /// Ended by the user. Excluded from the response rate entirely, since
+    /// nobody is waiting on a reply.
+    Closed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StatusDef {
+    pub name: String,
+    pub kind: StatusKind,
+}
+
+impl StatusDef {
+    pub fn new(name: &str, kind: StatusKind) -> Self {
+        Self {
+            name: name.to_string(),
+            kind,
+        }
+    }
+}
+
+/// The list a fresh install starts from.
+pub fn default_status_defs() -> Vec<StatusDef> {
+    vec![
+        StatusDef::new("Applied", StatusKind::Waiting),
+        StatusDef::new("Interviewing", StatusKind::Replied),
+        StatusDef::new("Offered", StatusKind::Replied),
+        StatusDef::new("Rejected", StatusKind::Replied),
+        StatusDef::new("Ghosted", StatusKind::Waiting),
+        StatusDef::new("Withdrawn", StatusKind::Closed),
+    ]
+}
+
+/// Normalises a user-edited list: trims, drops blanks, removes
+/// case-insensitive duplicates, and refuses to end up with nothing.
+pub fn sanitize_status_defs(defs: Vec<StatusDef>) -> Result<Vec<StatusDef>, String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for def in defs {
+        let name = def.name.trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        if name.chars().count() > 40 {
+            return Err(format!(
+                "'{name}' is too long for a status (40 characters max)."
+            ));
+        }
+        if !seen.insert(name.to_lowercase()) {
+            continue;
+        }
+        out.push(StatusDef {
+            name,
+            kind: def.kind,
+        });
+    }
+    if out.is_empty() {
+        return Err("Keep at least one status.".to_string());
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_describe_the_six_built_in_statuses() {
+        let defs = default_status_defs();
+        assert_eq!(defs.len(), 6);
+        assert_eq!(defs[0].name, "Applied");
+        assert_eq!(defs[0].kind, StatusKind::Waiting);
+        assert_eq!(
+            defs.iter().filter(|d| d.kind == StatusKind::Replied).count(),
+            3,
+            "interviewing, offered and rejected all count as a reply"
+        );
+        assert_eq!(
+            defs.iter().find(|d| d.name == "Withdrawn").unwrap().kind,
+            StatusKind::Closed
+        );
+    }
+
+    #[test]
+    fn sanitize_trims_and_drops_blanks() {
+        let out = sanitize_status_defs(vec![
+            StatusDef::new("  Applied  ", StatusKind::Waiting),
+            StatusDef::new("   ", StatusKind::Waiting),
+            StatusDef::new("", StatusKind::Replied),
+        ])
+        .unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "Applied");
+    }
+
+    #[test]
+    fn sanitize_drops_case_insensitive_duplicates_keeping_the_first() {
+        let out = sanitize_status_defs(vec![
+            StatusDef::new("Applied", StatusKind::Waiting),
+            StatusDef::new("applied", StatusKind::Replied),
+        ])
+        .unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, StatusKind::Waiting);
+    }
+
+    #[test]
+    fn sanitize_refuses_an_empty_list_and_over_long_names() {
+        assert!(sanitize_status_defs(vec![]).is_err());
+        assert!(sanitize_status_defs(vec![StatusDef::new("   ", StatusKind::Waiting)]).is_err());
+        let long = "x".repeat(41);
+        assert!(sanitize_status_defs(vec![StatusDef::new(&long, StatusKind::Waiting)]).is_err());
+    }
+}
+
 /// A single row in the job-applications workbook.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct JobApplication {

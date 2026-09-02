@@ -6,26 +6,34 @@
 (() => {
   "use strict";
 
-  /// Fixed display order, and the colour each status carries everywhere in
-  /// the UI: the summary chips, the meters, and the donut are all keyed off
-  /// this one list so they can never disagree.
-  const STATUS_ORDER = [
-    "Applied",
-    "Interviewing",
-    "Offered",
-    "Rejected",
-    "Ghosted",
-    "Withdrawn",
+  /// The list a fresh install starts from, mirroring `default_status_defs`
+  /// in models.rs. The real list comes from the backend and is editable, so
+  /// this is only the fallback for a call that doesn't pass one.
+  ///
+  /// `kind` is what keeps the response rate meaningful once the user can
+  /// invent statuses: "waiting" is sent-with-no-answer, "replied" is any
+  /// answer including a rejection, "closed" is ended by the user and is
+  /// excluded from the rate entirely.
+  const DEFAULT_STATUS_DEFS = [
+    { name: "Applied", kind: "waiting" },
+    { name: "Interviewing", kind: "replied" },
+    { name: "Offered", kind: "replied" },
+    { name: "Rejected", kind: "replied" },
+    { name: "Ghosted", kind: "waiting" },
+    { name: "Withdrawn", kind: "closed" },
   ];
 
-  /// A reply of any kind - an interview, an offer, or a rejection. A
-  /// rejection is still an answer; silence is what "Ghosted" and a bare
-  /// "Applied" mean.
-  const RESPONDED = ["Interviewing", "Offered", "Rejected"];
+  function defsOrDefault(defs) {
+    return Array.isArray(defs) && defs.length ? defs : DEFAULT_STATUS_DEFS;
+  }
 
-  function emptyCounts() {
+  function namesOf(defs) {
+    return defsOrDefault(defs).map((d) => d.name);
+  }
+
+  function emptyCounts(order) {
     const counts = Object.create(null);
-    for (const status of STATUS_ORDER) counts[status] = 0;
+    for (const status of order) counts[status] = 0;
     return counts;
   }
 
@@ -34,9 +42,10 @@
   /// A status the workbook contains but the app doesn't know about (someone
   /// typed into the cell) is kept rather than dropped, listed after the known
   /// ones, so the numbers on screen always add up to the row count.
-  function statusBreakdown(applications) {
+  function statusBreakdown(applications, statusDefs) {
     const rows = applications || [];
-    const counts = emptyCounts();
+    const order = namesOf(statusDefs);
+    const counts = emptyCounts(order);
     const extras = [];
 
     for (const app of rows) {
@@ -50,17 +59,15 @@
     }
 
     const total = rows.length;
-    const order = STATUS_ORDER.concat(
-      extras.filter((s, i) => extras.indexOf(s) === i)
-    );
+    const listed = order.concat(extras.filter((s, i) => extras.indexOf(s) === i));
 
     return {
       total,
-      segments: order.map((status) => ({
+      segments: listed.map((status) => ({
         status,
         count: counts[status] || 0,
         share: total ? (counts[status] || 0) / total : 0,
-        known: STATUS_ORDER.includes(status),
+        known: order.includes(status),
       })),
     };
   }
@@ -68,15 +75,22 @@
   /// How many applications got any reply, out of those that could still get
   /// one. Applications you withdrew are excluded from both sides - you ended
   /// those yourself, and counting them as silence would be misleading.
-  function responseRate(applications) {
+  function responseRate(applications, statusDefs) {
     const rows = applications || [];
+    const defs = defsOrDefault(statusDefs);
+    const kindOf = Object.create(null);
+    for (const def of defs) kindOf[def.name] = def.kind;
+
     let considered = 0;
     let responded = 0;
     for (const app of rows) {
       const status = (app && app.status ? String(app.status) : "").trim() || "Applied";
-      if (status === "Withdrawn") continue;
+      // A status the list no longer contains still counts as waiting: the
+      // row exists, and dropping it would quietly inflate the rate.
+      const kind = kindOf[status] || "waiting";
+      if (kind === "closed") continue;
       considered += 1;
-      if (RESPONDED.includes(status)) responded += 1;
+      if (kind === "replied") responded += 1;
     }
     return {
       responded,
@@ -118,8 +132,8 @@
   }
 
   window.JobTrackerStats = {
-    STATUS_ORDER,
-    RESPONDED,
+    DEFAULT_STATUS_DEFS,
+    namesOf,
     statusBreakdown,
     responseRate,
     donutSegments,

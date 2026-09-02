@@ -65,6 +65,10 @@
     summaryResponded: el("summary-responded"),
     summaryWaiting: el("summary-waiting"),
     summaryRows: el("summary-rows"),
+    filterChip: el("filter-chip"),
+    filterChipDot: el("filter-chip-dot"),
+    filterChipLabel: el("filter-chip-label"),
+    filterChipClear: el("filter-chip-clear"),
 
     calPrev: el("cal-prev"),
     calNext: el("cal-next"),
@@ -109,6 +113,17 @@
     updateBannerActions: el("update-banner-actions"),
     updateInstall: el("update-install"),
     updateLater: el("update-later"),
+
+    undoToast: el("undo-toast"),
+    undoMessage: el("undo-message"),
+    undoBtn: el("undo-btn"),
+    undoDismiss: el("undo-dismiss"),
+
+    importBtn: el("settings-import"),
+    importMessage: el("settings-import-message"),
+    statusList: el("settings-status-list"),
+    statusAdd: el("settings-status-add"),
+    statusMessage: el("settings-status-message"),
 
     retryToast: el("retry-toast"),
     retryMessage: el("retry-message"),
@@ -532,15 +547,47 @@
 
   const { escapeHtml } = window.JobTrackerFormat;
 
+  let statusFilter = null;   // status name the list is narrowed to, or null
+  let statusDefs = statsLib.DEFAULT_STATUS_DEFS; // replaced from the backend on init
+  let lastDeleted = null;    // { application, index } for one level of undo
+
+  /// Colours for statuses beyond the built-in six, assigned by position so
+  /// two custom statuses never share one. `st-other` is the last resort.
+  const EXTRA_STATUS_CLASSES = ["st-x1", "st-x2", "st-x3", "st-x4", "st-x5"];
+
+  /// Shows which status the list is narrowed to, with a way out. Sits next
+  /// to the count so it is impossible to forget a filter is on.
+  function renderFilterChip() {
+    if (!statusFilter) {
+      dom.filterChip.hidden = true;
+      return;
+    }
+    dom.filterChip.hidden = false;
+    dom.filterChipLabel.textContent = statusFilter;
+    dom.filterChipDot.className = `detail-chip ${statusClass(statusFilter)}`;
+  }
+
+  function setStatusFilter(status) {
+    statusFilter = statusFilter === status ? null : status;
+    renderApplicationsTable();
+  }
+
   /// Class carrying a status's colour. Unknown statuses - someone typed into
   /// the Status cell - share one fallback colour rather than going invisible.
   function statusClass(status) {
-    return statsLib.STATUS_ORDER.includes(status) ? `st-${status}` : "st-other";
+    const builtIn = statsLib.namesOf(statsLib.DEFAULT_STATUS_DEFS);
+    if (builtIn.includes(status)) return `st-${status}`;
+    // Position among the *custom* statuses, so two of them can't land on the
+    // same colour while the built-in slots sit unused.
+    const customs = statusOptionsCache.filter((name) => !builtIn.includes(name));
+    const index = customs.indexOf(status);
+    if (index === -1) return "st-other";
+    return EXTRA_STATUS_CLASSES[index % EXTRA_STATUS_CLASSES.length];
   }
 
   function renderStats() {
-    const breakdown = statsLib.statusBreakdown(allApplications);
-    const response = statsLib.responseRate(allApplications);
+    const breakdown = statsLib.statusBreakdown(allApplications, statusDefs);
+    const response = statsLib.responseRate(allApplications, statusDefs);
 
     dom.summaryTotal.textContent = String(breakdown.total);
     dom.summaryResponseRate.textContent = statsLib.percent(response.rate);
@@ -563,13 +610,18 @@
     dom.summaryRows.innerHTML = breakdown.segments
       .map((seg) => {
         const width = busiest ? (seg.count / busiest) * 100 : 0;
-        return `<div class="detail-row${seg.count === 0 ? " muted" : ""}">
+        const classes = ["detail-row"];
+        if (seg.count === 0) classes.push("muted");
+        if (seg.status === statusFilter) classes.push("active");
+        return `<button type="button" class="${classes.join(" ")}" data-status="${escapeHtml(seg.status)}"
+          aria-pressed="${seg.status === statusFilter}"
+          title="Show only ${escapeHtml(seg.status)} applications">
           <i class="detail-chip ${statusClass(seg.status)}"></i>
           <span class="detail-label">${escapeHtml(seg.status)}</span>
           <span class="meter"><span class="meter-fill ${statusClass(seg.status)}" style="width: ${width}%"></span></span>
           <span class="detail-value">${seg.count}</span>
           <span class="detail-share">${statsLib.percent(seg.share)}</span>
-        </div>`;
+        </button>`;
       })
       .join("");
   }
@@ -600,6 +652,18 @@
     }
   }
 
+  /// Fields the search box looks through. Notes is included deliberately -
+  /// with Tesseract it holds the whole raw OCR text of the posting, which is
+  /// often the only place a team name or a requirement was captured.
+  const SEARCH_FIELDS = ["company", "position", "location", "job_id", "notes"];
+
+  function matchesQuery(app, query) {
+    if (!query) return true;
+    return SEARCH_FIELDS.some((field) =>
+      (app[field] || "").toString().toLowerCase().includes(query)
+    );
+  }
+
   function renderApplicationsTable() {
     renderStats();
     renderSortIndicators();
@@ -607,14 +671,11 @@
     const rows = sortRows(
       allApplications
         .map((app, index) => ({ app, index }))
-        .filter(({ app }) => {
-          if (!query) return true;
-          return (
-            (app.company || "").toLowerCase().includes(query) ||
-            (app.position || "").toLowerCase().includes(query)
-          );
-        })
+        .filter(({ app }) => matchesQuery(app, query))
+        .filter(({ app }) => !statusFilter || (app.status || "Applied") === statusFilter)
     );
+
+    renderFilterChip();
 
     if (rows.length === 0) {
       dom.tbody.innerHTML = "";
@@ -648,7 +709,7 @@
       .join("");
   }
 
-  let statusOptionsCache = ["Applied", "Interviewing", "Offered", "Rejected", "Ghosted", "Withdrawn"];
+  let statusOptionsCache = statsLib.namesOf(statsLib.DEFAULT_STATUS_DEFS);
 
   function statusSelect(index, current) {
     const options = statusOptionsCache
@@ -683,6 +744,14 @@
     }
     applySummaryCollapsed(collapsed);
   }
+
+  dom.summaryRows.addEventListener("click", (e) => {
+    const row = e.target.closest(".detail-row");
+    if (!row) return;
+    setStatusFilter(row.dataset.status);
+  });
+
+  dom.filterChipClear.addEventListener("click", () => setStatusFilter(statusFilter));
 
   dom.sortHeaders.forEach((th) => {
     th.addEventListener("click", () => {
@@ -761,15 +830,47 @@
         expectedCompany: app.company,
         expectedPosition: app.position,
       });
+      // Keep the whole row, not just its index: undo has to put back every
+      // field, and the workbook no longer holds any of them.
+      lastDeleted = { application: { ...app }, index };
       // Re-read rather than splicing locally: every other row's index just
       // shifted, and the calendar is keyed off the same array.
       await loadApplications();
-      dom.listStatus.textContent = `Deleted ${app.company} - ${app.position}.`;
+      showUndoToast(`Deleted ${app.company} - ${app.position}.`);
     } catch (e) {
       dom.listStatus.textContent = String(e);
       showRetryToast(`Couldn't delete that row: ${e}`, () => deleteApplication(index, app));
     }
   }
+
+  function showUndoToast(message) {
+    dom.undoMessage.textContent = message;
+    dom.undoToast.hidden = false;
+  }
+
+  function hideUndoToast() {
+    dom.undoToast.hidden = true;
+    lastDeleted = null;
+  }
+
+  dom.undoDismiss.addEventListener("click", hideUndoToast);
+
+  dom.undoBtn.addEventListener("click", async () => {
+    if (!lastDeleted) return;
+    const { application, index } = lastDeleted;
+    hideUndoToast();
+    try {
+      await invoke("insert_application_at_index", { index, application });
+      await loadApplications();
+      dom.listStatus.textContent = `Restored ${application.company} - ${application.position}.`;
+    } catch (e) {
+      dom.listStatus.textContent = String(e);
+      showRetryToast(`Couldn't restore that row: ${e}`, () => {
+        lastDeleted = { application, index };
+        dom.undoBtn.click();
+      });
+    }
+  });
 
   async function loadApplications() {
     dom.listStatus.textContent = "Loading…";
@@ -1119,6 +1220,146 @@
     }
   });
 
+  // ---------- Settings: import and statuses ----------
+
+  dom.importBtn.addEventListener("click", async () => {
+    dom.importBtn.disabled = true;
+    dom.importMessage.hidden = false;
+    dom.importMessage.textContent = "Choosing a file…";
+    try {
+      const path = await invoke("pick_import_file");
+      if (!path) {
+        dom.importMessage.hidden = true;
+        return;
+      }
+      dom.importMessage.textContent = "Importing…";
+      const summary = await invoke("import_applications", { path });
+      const parts = [`Imported ${summary.imported} application${summary.imported === 1 ? "" : "s"}`];
+      if (summary.skipped_duplicates) {
+        parts.push(`${summary.skipped_duplicates} already here`);
+      }
+      if (summary.skipped_blank) {
+        parts.push(`${summary.skipped_blank} blank row${summary.skipped_blank === 1 ? "" : "s"} skipped`);
+      }
+      dom.importMessage.textContent = `${parts.join(", ")}.`;
+      if (summary.imported > 0) await loadApplications();
+    } catch (e) {
+      dom.importMessage.textContent = String(e);
+    } finally {
+      dom.importBtn.disabled = false;
+    }
+  });
+
+  const STATUS_KINDS = [
+    ["waiting", "No reply yet"],
+    ["replied", "They replied"],
+    ["closed", "Closed by me"],
+  ];
+
+  /// Rows are rebuilt from `statusDefs` on every change rather than edited
+  /// in place, so what is on screen is always exactly what would be saved.
+  function renderStatusSettings() {
+    dom.statusList.innerHTML = statusDefs
+      .map(
+        (def, i) => `<div class="status-edit-row">
+          <input type="text" class="status-name" data-index="${i}" value="${escapeHtml(def.name)}" maxlength="40" aria-label="Status name" />
+          <select class="status-kind" data-index="${i}" aria-label="What this status means">
+            ${STATUS_KINDS.map(
+              ([value, label]) =>
+                `<option value="${value}"${def.kind === value ? " selected" : ""}>${label}</option>`
+            ).join("")}
+          </select>
+          <button type="button" class="status-remove btn-link btn-small" data-index="${i}"
+            title="Remove this status" aria-label="Remove ${escapeHtml(def.name)}">&times;</button>
+        </div>`
+      )
+      .join("");
+  }
+
+  async function saveStatusDefs(defs) {
+    try {
+      statusDefs = await invoke("set_status_defs", { defs });
+      statusOptionsCache = statsLib.namesOf(statusDefs);
+      dom.statusMessage.hidden = true;
+      renderStatusSettings();
+      await populateStatusDropdown();
+      renderApplicationsTable();
+    } catch (e) {
+      dom.statusMessage.hidden = false;
+      dom.statusMessage.textContent = String(e);
+      renderStatusSettings();
+    }
+  }
+
+  function rejectStatusEdit(message) {
+    dom.statusMessage.hidden = false;
+    dom.statusMessage.textContent = message;
+    renderStatusSettings(); // puts the field back to the stored value
+  }
+
+  dom.statusList.addEventListener("change", (e) => {
+    const index = Number(e.target.dataset.index);
+    if (Number.isNaN(index)) return;
+    const next = statusDefs.map((d) => ({ ...d }));
+
+    if (e.target.classList.contains("status-name")) {
+      const name = e.target.value.trim();
+      // The backend drops blanks and duplicates, which is right for a bulk
+      // set and wrong for a field being retyped - clearing it to edit it
+      // would delete the status. Refuse here instead.
+      if (!name) {
+        rejectStatusEdit("A status needs a name. Use × to remove one.");
+        return;
+      }
+      const clash = statusDefs.some(
+        (d, i) => i !== index && d.name.toLowerCase() === name.toLowerCase()
+      );
+      if (clash) {
+        rejectStatusEdit(`There is already a "${name}" status.`);
+        return;
+      }
+      next[index].name = name;
+    } else if (e.target.classList.contains("status-kind")) {
+      next[index].kind = e.target.value;
+    } else {
+      return;
+    }
+    saveStatusDefs(next);
+  });
+
+  dom.statusList.addEventListener("click", (e) => {
+    if (!e.target.classList.contains("status-remove")) return;
+    const index = Number(e.target.dataset.index);
+    const removed = statusDefs[index];
+    if (!removed) return;
+    const inUse = allApplications.filter((a) => (a.status || "Applied") === removed.name).length;
+    const warning = inUse
+      ? `
+
+${inUse} saved application${inUse === 1 ? "" : "s"} still use it. They keep it - it just stops being offered for new entries.`
+      : "";
+    if (!window.confirm(`Remove the "${removed.name}" status?${warning}`)) return;
+    saveStatusDefs(statusDefs.filter((_, i) => i !== index));
+  });
+
+  dom.statusAdd.addEventListener("click", () => {
+    // A fixed name would be dropped as a duplicate on the second click.
+    const taken = new Set(statusDefs.map((d) => d.name.toLowerCase()));
+    let name = "New status";
+    for (let n = 2; taken.has(name.toLowerCase()); n++) name = `New status ${n}`;
+    saveStatusDefs(statusDefs.concat([{ name, kind: "waiting" }]));
+  });
+
+  async function loadStatusDefs() {
+    try {
+      statusDefs = await invoke("get_status_defs");
+    } catch (_) {
+      statusDefs = statsLib.DEFAULT_STATUS_DEFS;
+    }
+    statusOptionsCache = statsLib.namesOf(statusDefs);
+    renderStatusSettings();
+  }
+
   // ---------- Updates ----------
 
   function showSettingsUpdateMessage(message) {
@@ -1311,12 +1552,14 @@
   async function init() {
     applyPlatformHints();
     restoreSummaryCollapsed();
+    await loadStatusDefs();
     resetCaptureArea();
     await populateStatusDropdown();
     await loadExtractionMethod();
     await checkFirstRunSetup();
     await refreshApiKeyStatus();
     await refreshExcelPath();
+    await loadApplications();
     await loadUpdateSettings();
     // One check on startup, throttled and opt-out-able in Rust. A failure
     // here (offline, endpoint down) must never block using the app.
