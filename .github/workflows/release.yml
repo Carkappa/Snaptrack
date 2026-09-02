@@ -98,7 +98,22 @@ jobs:
           releaseName: "Job Tracker ${{ github.ref_name }}"
           # This text also becomes the `notes` field in latest.json, which is
           # what an installed copy shows when it offers the update.
+          # Asset filenames say "aarch64" and "x64-setup", which tells a
+          # user nothing about which one they want. Every release carries
+          # this table so the choice is obvious without reading the README.
           releaseBody: |
+            ### Which file do I need?
+
+            | You have | Download |
+            | --- | --- |
+            | **Windows** | `..._x64-setup.exe` |
+            | **Mac, Apple Silicon** (M1-M4) | `..._aarch64.dmg` |
+            | **Mac, Intel** | `..._x64.dmg` |
+
+            Windows also has an `.msi` if your workplace prefers one. The
+            `.app.tar.gz`, `.sig` and `latest.json` files are used by the
+            app to update itself - you do not need to download them.
+
             Installed copies pick this up automatically.
 
             The build is not code-signed, so Windows SmartScreen and macOS
