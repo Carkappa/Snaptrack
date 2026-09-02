@@ -65,7 +65,7 @@ fn full_capture_to_excel_pipeline() {
 
     // Settings: point the app at our temp workbook, same as the Settings
     // tab's "Choose..." button would via pick_excel_path + set_excel_path.
-    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy(, false).to_string())
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string(), false)
         .expect("set_excel_path should succeed");
     assert_eq!(
         commands::get_excel_path(handle.clone()).expect("get_excel_path should succeed"),
@@ -293,7 +293,7 @@ fn deleting_a_row_removes_only_that_row() {
     let dir = temp_dir_for("delete");
     let xlsx_path = dir.join("Delete.xlsx");
     let _ = std::fs::remove_file(&xlsx_path);
-    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy(, false).to_string()).unwrap();
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string(), false).unwrap();
 
     let mut second = amazon_application();
     second.company = "Stripe".into();
@@ -335,7 +335,7 @@ fn deleting_refuses_when_the_row_is_not_the_one_the_user_saw() {
     let dir = temp_dir_for("delete-guard");
     let xlsx_path = dir.join("DeleteGuard.xlsx");
     let _ = std::fs::remove_file(&xlsx_path);
-    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy(, false).to_string()).unwrap();
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string(), false).unwrap();
 
     commands::save_application(handle.clone(), amazon_application(), false).unwrap();
 
@@ -382,7 +382,7 @@ fn editing_the_status_list_leaves_existing_rows_alone() {
     let dir = temp_dir_for("statuses");
     let xlsx_path = dir.join("Statuses.xlsx");
     let _ = std::fs::remove_file(&xlsx_path);
-    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy(, false).to_string()).unwrap();
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string(), false).unwrap();
 
     let mut row = amazon_application();
     row.status = "Ghosted".into();
@@ -457,7 +457,7 @@ fn a_deleted_row_can_be_put_back() {
     let dir = temp_dir_for("undo");
     let xlsx_path = dir.join("Undo.xlsx");
     let _ = std::fs::remove_file(&xlsx_path);
-    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy(, false).to_string()).unwrap();
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string(), false).unwrap();
 
     let mut second = amazon_application();
     second.company = "Stripe".into();
@@ -501,7 +501,7 @@ fn importing_merges_and_skips_duplicates() {
 
     // Build the source workbook through the same commands, then point the
     // app back at its own workbook.
-    commands::set_excel_path(handle.clone(), source.to_string_lossy(, false).to_string()).unwrap();
+    commands::set_excel_path(handle.clone(), source.to_string_lossy().to_string(), false).unwrap();
     let mut shared = amazon_application();
     shared.company = "Amazon".into();
     let mut only_in_source = amazon_application();
@@ -511,7 +511,7 @@ fn importing_merges_and_skips_duplicates() {
         commands::save_application(handle.clone(), row, false).unwrap();
     }
 
-    commands::set_excel_path(handle.clone(), target.to_string_lossy(, false).to_string()).unwrap();
+    commands::set_excel_path(handle.clone(), target.to_string_lossy().to_string(), false).unwrap();
     commands::save_application(handle.clone(), shared, false).unwrap();
 
     let summary = commands::import_applications(handle.clone(), source.to_string_lossy().to_string())
@@ -524,7 +524,7 @@ fn importing_merges_and_skips_duplicates() {
     assert!(rows.iter().any(|r| r.company == "Datadog"));
 
     // The source file must be left exactly as it was.
-    commands::set_excel_path(handle.clone(), source.to_string_lossy(, false).to_string()).unwrap();
+    commands::set_excel_path(handle.clone(), source.to_string_lossy().to_string(), false).unwrap();
     assert_eq!(
         commands::list_applications(handle.clone()).unwrap().len(),
         2,
@@ -540,7 +540,7 @@ fn importing_the_workbook_you_are_already_using_is_refused() {
     let dir = temp_dir_for("import-self");
     let path = dir.join("Self.xlsx");
     let _ = std::fs::remove_file(&path);
-    commands::set_excel_path(handle.clone(), path.to_string_lossy(, false).to_string()).unwrap();
+    commands::set_excel_path(handle.clone(), path.to_string_lossy().to_string(), false).unwrap();
     commands::save_application(handle.clone(), amazon_application(), false).unwrap();
 
     let err = commands::import_applications(handle.clone(), path.to_string_lossy().to_string())
@@ -561,7 +561,7 @@ fn an_archived_screenshot_is_found_again() {
     let dir = temp_dir_for("shot-lookup");
     let xlsx_path = dir.join("Shots.xlsx");
     let _ = std::fs::remove_dir_all(dir.join("JobApplications_screenshots"));
-    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy(, false).to_string()).unwrap();
+    commands::set_excel_path(handle.clone(), xlsx_path.to_string_lossy().to_string(), false).unwrap();
 
     let row = amazon_application();
     // Nothing archived yet.
