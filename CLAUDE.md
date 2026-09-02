@@ -88,6 +88,9 @@ Three lints run in CI, each for a bug that shipped:
   A syntax error in JS; legal in Rust, so it ships.
 - `check-mock-shapes.sh` - harness mocks drifting from the Rust types they
   stand in for.
+- `check-workflows.sh` - workflow YAML that does not parse. Run this one
+  **before pushing**: a broken workflow cannot report its own breakage, so
+  it is the single failure CI structurally cannot catch. Needs `pyyaml`.
 
 All three fail when their target is reintroduced; if you change one, check
 that still holds.

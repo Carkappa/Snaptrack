@@ -68,8 +68,8 @@ jobs:
       - name: Check every invoked command is registered
         run: bash scripts/check-commands.sh
 
-      # A 
- that became a real newline: fatal in JS, silent in Rust.
+      # A backslash-n that became a real newline: fatal in JS, silent
+      # in Rust, so it compiles and ships.
       - name: Check no string literal is broken across lines
         run: bash scripts/check-syntax.sh
 
