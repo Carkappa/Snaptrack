@@ -211,6 +211,30 @@ fn type_size(block: &OcrLine) -> f32 {
 /// company sitting above the title.
 const COMPANY_LINE_RATIO: f32 = 0.75;
 
+/// Phrases that only ever appear in a job board's own chrome.
+///
+/// Nothing here is part of a job title, so a block carrying one cannot be
+/// the title however it measures. Font size alone is not enough: a word's
+/// box height depends on which letters it contains, so a small line full of
+/// descenders ("Reposted 4 months ago") can measure taller than a large
+/// line of mostly cap-height words ("IT Co-op - Fall 2026"), and the title
+/// then loses to the line under it.
+const METADATA_MARKERS: [&str; 8] = [
+    "people clicked apply",
+    "applicants",
+    "promoted by",
+    "responses managed",
+    "reposted",
+    "months ago",
+    "weeks ago",
+    "days ago",
+];
+
+fn looks_like_metadata(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    METADATA_MARKERS.iter().any(|m| lower.contains(m))
+}
+
 /// The run of lines within a block that are the job title itself.
 ///
 /// A block frequently holds more than the title. The company sits above it,
@@ -716,6 +740,7 @@ pub fn guess_fields(lines: &[OcrLine]) -> ExtractedFields {
         .iter()
         .enumerate()
         .filter(|(_, l)| l.text.chars().filter(|c| c.is_alphanumeric()).count() >= 3)
+        .filter(|(_, l)| !looks_like_metadata(&l.text))
         .max_by(|(_, a), (_, b)| {
             type_size(a)
                 .partial_cmp(&type_size(b))
@@ -1745,5 +1770,80 @@ mod tests {
             ],
         };
         assert_eq!(title_run(&block), 0..2, "a wrapped title stays whole");
+    }
+
+    // ---- board chrome is never the job title ----
+    //
+    // Reported from a real capture: an AtriCure posting came back with the
+    // company set to the job title and the position set to
+    // "Mason, OH - Reposted 4 months ago - Over 100 people clicked apply
+    // Promoted by hirer ...". Everything had shifted down by one block
+    // because the metadata line was chosen as the title.
+
+    #[test]
+    fn linkedin_chrome_is_recognised_as_metadata() {
+        assert!(looks_like_metadata("Mason, OH - Reposted 4 months ago"));
+        assert!(looks_like_metadata("Over 100 people clicked apply"));
+        assert!(looks_like_metadata("Promoted by hirer - Responses managed off LinkedIn"));
+        assert!(looks_like_metadata("Westboro, WI - 5 days ago"));
+        assert!(looks_like_metadata("Over 200 applicants"));
+    }
+
+    #[test]
+    fn a_real_title_is_not_mistaken_for_chrome() {
+        for title in [
+            "IT Co-op - Fall 2026",
+            "Robotics - Software Development Engineer Fall Intern/Co-op - 2026",
+            "Senior Platform Engineer",
+            "Applications Engineer",
+        ] {
+            assert!(!looks_like_metadata(title), "{title} is a job title");
+        }
+    }
+
+    #[test]
+    fn a_metadata_block_cannot_win_the_title_even_when_it_measures_taller() {
+        // A word's box height depends on its letters: a small line full of
+        // descenders out-measures a large line of cap-height words. The
+        // measurements here are deliberately the wrong way round.
+        let blocks = vec![
+            OcrLine::flat("AtriCure, Inc.", 0.0, 13.0),
+            OcrLine {
+                text: "IT Co-op - Fall 2026".into(),
+                top: 30.0,
+                height: 26.0,
+                sub_lines: vec![SubLine { text: "IT Co-op - Fall 2026".into(), height: 18.0 }],
+            },
+            OcrLine {
+                text: "Mason, OH - Reposted 4 months ago - Over 100 people clicked apply".into(),
+                top: 70.0,
+                height: 40.0,
+                sub_lines: vec![SubLine {
+                    text: "Mason, OH - Reposted 4 months ago - Over 100 people clicked apply".into(),
+                    height: 22.0,
+                }],
+            },
+        ];
+        let f = guess_fields(&blocks);
+        assert_eq!(f.position.as_deref(), Some("IT Co-op - Fall 2026"));
+        assert_eq!(
+            f.company.as_deref(),
+            Some("AtriCure, Inc."),
+            "with the title right, the company is the block above it"
+        );
+        assert_eq!(f.location.as_deref(), Some("Mason, OH"));
+    }
+
+    #[test]
+    fn chrome_is_still_read_for_the_fields_it_does_carry() {
+        // Excluded from being the title, not from the scan - the location
+        // and the posted date live in exactly these lines.
+        let f = guess_fields(&vec![
+            OcrLine::flat("Acme", 0.0, 10.0),
+            OcrLine::flat("Senior Engineer", 20.0, 30.0),
+            OcrLine::flat("Mason, OH - Reposted 4 months ago - On-site", 60.0, 12.0),
+        ]);
+        assert_eq!(f.location.as_deref(), Some("Mason, OH"));
+        assert_eq!(f.work_type.as_deref(), Some("On-site"));
     }
 }

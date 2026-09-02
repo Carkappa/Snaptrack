@@ -2063,6 +2063,16 @@ ${inUse} saved application${inUse === 1 ? "" : "s"} still use it. They keep it -
   });
 
   listen("capture-shortcut-triggered", () => {
+    // The window is being shown - from the tray or the hotkey. This is a
+    // tray app that can sit running for days, and the only other check
+    // happens when the webview first loads, so a release published while
+    // it was open would otherwise never surface. Rust still throttles to
+    // once a day and honours the "check automatically" preference, so this
+    // costs nothing when there is nothing to find.
+    checkForUpdate(false).catch(() => {
+      /* an update check must never interrupt opening the window */
+    });
+
     activateTab("capture");
     if (!dom.form.hidden) return;
     dom.dropzone.focus();

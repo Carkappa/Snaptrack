@@ -163,9 +163,7 @@ fn ollama_body(model: &str, ocr_text: &str) -> serde_json::Value {
         "format": field_schema(),
         "messages": [
             { "role": "system", "content": SYSTEM_PROMPT },
-            { "role": "user", "content": format!("{USER_PROMPT}
-
-{ocr_text}") }
+            { "role": "user", "content": format!("{USER_PROMPT}\n\n{ocr_text}") }
         ]
     })
 }
@@ -680,8 +678,7 @@ mod tests {
 
     #[test]
     fn ollama_is_sent_text_and_a_schema_not_an_image() {
-        let b = ollama_body("qwen2.5:3b", "Amazon
-Robotics Engineer");
+        let b = ollama_body("qwen2.5:3b", "Amazon\nRobotics Engineer");
         assert_eq!(b["model"], "qwen2.5:3b");
         assert_eq!(b["stream"], false, "the app waits for one whole answer");
         assert_eq!(b["messages"][0]["content"], SYSTEM_PROMPT);

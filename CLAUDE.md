@@ -76,6 +76,22 @@ about *changing* it belongs here. When adding a feature, fold it into an
 existing line rather than adding a section; the README got to twice this
 length by growing a paragraph per release.
 
+## Guards
+
+Three lints run in CI, each for a bug that shipped:
+
+- `check-commands.sh` - a command called from `src/` but missing from
+  `generate_handler![]`. Compiles fine both sides, and the harness mocks
+  `invoke` by name, so it only fails in the built app.
+- `check-syntax.sh` - a `
+` that became a real newline inside a string.
+  A syntax error in JS; legal in Rust, so it ships.
+- `check-mock-shapes.sh` - harness mocks drifting from the Rust types they
+  stand in for.
+
+All three fail when their target is reintroduced; if you change one, check
+that still holds.
+
 ## Things that will bite you
 
 - **The single-instance plugin must stay registered first.** Two copies mean
