@@ -211,6 +211,39 @@ fn type_size(block: &OcrLine) -> f32 {
 /// company sitting above the title.
 const COMPANY_LINE_RATIO: f32 = 0.75;
 
+/// The run of lines within a block that are the job title itself.
+///
+/// A block frequently holds more than the title. The company sits above it,
+/// and when Tesseract merges aggressively - which it does on a dark-mode
+/// capture, where the whole card can come back as one paragraph - the
+/// location, the posted date and the chips all end up below it in the same
+/// block. The title is the run of lines set at the block's largest type
+/// size; anything smaller on either side is something else, and must not be
+/// pasted into the position field nor hidden from the keyword scan.
+fn title_run(block: &OcrLine) -> std::ops::Range<usize> {
+    if block.sub_lines.is_empty() {
+        return 0..0;
+    }
+    let max = block
+        .sub_lines
+        .iter()
+        .fold(0.0_f32, |acc, l| acc.max(l.height));
+    if max <= 0.0 {
+        return 0..block.sub_lines.len();
+    }
+    let threshold = max * COMPANY_LINE_RATIO;
+    let start = block
+        .sub_lines
+        .iter()
+        .position(|l| l.height >= threshold)
+        .unwrap_or(0);
+    let len = block.sub_lines[start..]
+        .iter()
+        .take_while(|l| l.height >= threshold)
+        .count();
+    start..start + len
+}
+
 /// Splits a block whose first line is set smaller than the rest into
 /// (company, title). Returns None when the block is all one size, which is
 /// the normal case for a title that simply wrapped.
@@ -696,10 +729,21 @@ pub fn guess_fields(lines: &[OcrLine]) -> ExtractedFields {
     // company empty and the title carrying the company name.
     let split = title_index.and_then(|i| split_company_from_title(sorted[i]));
 
-    let position = match &split {
-        Some((_, title)) => Some(strip_trailing_glyphs(title)),
-        None => title_index.map(|i| strip_trailing_glyphs(sorted[i].text.trim())),
-    };
+    // Only the title lines of the title block, never the whole block.
+    let position = title_index.map(|i| {
+        let block = sorted[i];
+        let run = title_run(block);
+        let text = if run.is_empty() {
+            block.text.trim().to_string()
+        } else {
+            block.sub_lines[run]
+                .iter()
+                .map(|l| l.text.trim())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        strip_trailing_glyphs(text.trim())
+    });
 
     // A logo usually OCRs as its own block of one or two glyphs sitting
     // directly above the company name. That is not the company, so a
@@ -728,40 +772,60 @@ pub fn guess_fields(lines: &[OcrLine]) -> ExtractedFields {
     let mut job_id = None;
     let mut posted_date = None;
 
-    for (idx, line) in sorted.iter().enumerate() {
-        let lower = line.text.to_lowercase();
+    // Scanned line by line rather than block by block. When Tesseract folds
+    // the whole card into one paragraph, the chips and the location sit in
+    // the title's own block, and skipping the block would lose them - while
+    // scanning the title line itself would match "Internship" out of
+    // "... Fall Intern/Co-op ..." before ever reaching the real badge.
+    let mut scan: Vec<&str> = Vec::new();
+    for (idx, block) in sorted.iter().enumerate() {
+        let skip = if title_index == Some(idx) {
+            title_run(block)
+        } else {
+            0..0
+        };
+        if block.sub_lines.is_empty() {
+            if skip.is_empty() {
+                scan.push(block.text.as_str());
+            }
+            continue;
+        }
+        for (i, line) in block.sub_lines.iter().enumerate() {
+            if !skip.contains(&i) {
+                scan.push(line.text.as_str());
+            }
+        }
+    }
+
+    for line in scan {
+        let lower = line.to_lowercase();
 
         if location.is_none() {
-            if let Some(m) = location_re().find(&line.text) {
+            if let Some(m) = location_re().find(line) {
                 let cleaned = strip_edge_noise(m.as_str().trim());
                 if !cleaned.is_empty() {
                     location = Some(cleaned);
                 }
             }
         }
-        // The title itself is excluded from the work/employment-type scan:
-        // titles like "... Fall Intern/Co-op ..." would otherwise spuriously
-        // match "Internship" before the real "Full-time"-style badge line
-        // is reached.
-        let is_title_line = title_index == Some(idx);
-        if work_type.is_none() && !is_title_line {
+        if work_type.is_none() {
             work_type = find_keyword(&lower, &WORK_TYPE_KEYWORDS);
         }
-        if employment_type.is_none() && !is_title_line {
+        if employment_type.is_none() {
             employment_type = find_keyword(&lower, &EMPLOYMENT_TYPE_KEYWORDS);
         }
         if salary_range.is_none() {
-            if let Some(m) = salary_re().find(&line.text) {
+            if let Some(m) = salary_re().find(line) {
                 salary_range = Some(m.as_str().trim().to_string());
             }
         }
         if job_id.is_none() {
-            if let Some(caps) = job_id_re().captures(&line.text) {
+            if let Some(caps) = job_id_re().captures(line) {
                 job_id = caps.get(1).map(|m| m.as_str().to_string());
             }
         }
         if posted_date.is_none() {
-            if let Some(m) = posted_date_re().find(&line.text) {
+            if let Some(m) = posted_date_re().find(line) {
                 posted_date = Some(m.as_str().trim().to_string());
             }
         }
@@ -1571,5 +1635,115 @@ mod tests {
         let mut fields = ExtractedFields::default();
         apply_hints(&mut fields, &b, &hints);
         assert_eq!(fields.company.as_deref(), Some("Amazon"));
+    }
+
+    // ---- a block that swallowed the whole card ----
+    //
+    // Measured: on a dark-mode capture of the same LinkedIn card, Tesseract
+    // returned the title and everything under it as one paragraph. The title
+    // is the only line at the block's largest size; the rest is other
+    // content that still has to be read.
+
+    fn merged_card_block() -> OcrLine {
+        OcrLine {
+            text: "everything in one paragraph".into(),
+            top: 40.0,
+            height: 160.0,
+            sub_lines: vec![
+                SubLine { text: "Robotics - Software Development Engineer Fall".into(), height: 40.0 },
+                SubLine { text: "Intern/Co-op - 2026".into(), height: 40.0 },
+                SubLine { text: "Westboro, WI: 5 days ago 42 people clicked apply".into(), height: 21.0 },
+                SubLine { text: "Promoted by hirer - Responses managed off LinkedIn".into(), height: 20.0 },
+                SubLine { text: "O On-site Full-time".into(), height: 20.0 },
+            ],
+        }
+    }
+
+    #[test]
+    fn the_title_is_only_the_lines_at_the_largest_size() {
+        let run = title_run(&merged_card_block());
+        assert_eq!(run, 0..2, "the two title lines, not the four smaller ones");
+    }
+
+    #[test]
+    fn a_merged_block_does_not_paste_the_page_into_the_position() {
+        let blocks = vec![
+            OcrLine::flat("| a Amazon", 10.0, 20.0),
+            merged_card_block(),
+        ];
+        let f = guess_fields(&blocks);
+        assert_eq!(
+            f.position.as_deref(),
+            Some("Robotics - Software Development Engineer Fall Intern/Co-op - 2026"),
+            "the location and chips below the title are not part of it"
+        );
+        assert_eq!(f.company.as_deref(), Some("Amazon"));
+    }
+
+    #[test]
+    fn content_merged_into_the_title_block_is_still_scanned() {
+        // Skipping the whole block would lose these: they are inside it.
+        let f = guess_fields(&vec![
+            OcrLine::flat("| a Amazon", 10.0, 20.0),
+            merged_card_block(),
+        ]);
+        assert_eq!(f.location.as_deref(), Some("Westboro, WI"));
+        assert_eq!(f.work_type.as_deref(), Some("On-site"));
+        assert_eq!(
+            f.employment_type.as_deref(),
+            Some("Full-time"),
+            "read from the chips, not Intern/Co-op one line above them"
+        );
+    }
+
+    #[test]
+    fn the_title_line_itself_is_never_scanned_for_keywords() {
+        // "Fall Intern/Co-op" would otherwise become Internship.
+        let f = guess_fields(&vec![
+            OcrLine::flat("Acme", 0.0, 10.0),
+            OcrLine {
+                text: "Software Engineer Fall Intern/Co-op".into(),
+                top: 20.0,
+                height: 30.0,
+                sub_lines: vec![SubLine {
+                    text: "Software Engineer Fall Intern/Co-op".into(),
+                    height: 30.0,
+                }],
+            },
+            OcrLine::flat("Full-time", 60.0, 12.0),
+        ]);
+        assert_eq!(f.employment_type.as_deref(), Some("Full-time"));
+    }
+
+    #[test]
+    fn a_company_line_above_the_title_still_splits_off() {
+        // The other direction: a smaller line before the title, not after.
+        let block = OcrLine {
+            text: "Acme Senior Engineer".into(),
+            top: 0.0,
+            height: 50.0,
+            sub_lines: vec![
+                SubLine { text: "Acme".into(), height: 12.0 },
+                SubLine { text: "Senior Engineer".into(), height: 30.0 },
+            ],
+        };
+        assert_eq!(title_run(&block), 1..2);
+        let f = guess_fields(&vec![block]);
+        assert_eq!(f.company.as_deref(), Some("Acme"));
+        assert_eq!(f.position.as_deref(), Some("Senior Engineer"));
+    }
+
+    #[test]
+    fn a_uniform_block_is_all_title() {
+        let block = OcrLine {
+            text: "Senior Platform Engineer".into(),
+            top: 0.0,
+            height: 60.0,
+            sub_lines: vec![
+                SubLine { text: "Senior Platform".into(), height: 30.0 },
+                SubLine { text: "Engineer".into(), height: 30.0 },
+            ],
+        };
+        assert_eq!(title_run(&block), 0..2, "a wrapped title stays whole");
     }
 }
