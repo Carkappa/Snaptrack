@@ -69,7 +69,11 @@ Switch between these anytime in Settings — no restart needed:
   installed [Tesseract](https://github.com/tesseract-ocr/tesseract)
   binary, then guesses which recognized text block is the company vs.
   the position vs. the location using layout heuristics (the job title
-  is almost always the single largest text on the page). Meaningfully
+  is almost always the single largest text on the page). The screenshot
+  is prepared first — greyscaled, **inverted if you browse in dark mode**,
+  contrast-stretched, and enlarged if the text is small — and read in
+  three page-segmentation modes, keeping whichever recognised the most.
+  That preparation is where most of the offline accuracy comes from. Meaningfully
   less accurate than Claude — it can't actually *understand* the image,
   just read text off it — so the full raw OCR text is always attached to
   the Notes field for you to cross-check and fix by hand. Requires

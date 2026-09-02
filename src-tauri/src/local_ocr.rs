@@ -22,6 +22,98 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// grouping into text blocks.
 const MIN_WORD_CONFIDENCE: f32 = 30.0;
 
+/// Mean luminance (0-255) below which the image is treated as dark-mode
+/// and inverted. Tesseract is trained on dark text over a light page; a
+/// dark-mode screenshot is the exact inverse and reads badly without this.
+const DARK_MODE_THRESHOLD: f32 = 110.0;
+
+/// Text in a UI screenshot is typically 12-16px, where Tesseract wants
+/// roughly 30px cap height. Anything narrower than this gets scaled up.
+const UPSCALE_BELOW_WIDTH: u32 = 1600;
+
+/// Ceiling on the scaled result, so a 4K screenshot isn't blown up into
+/// something that takes seconds to OCR for no gain.
+const MAX_SCALED_WIDTH: u32 = 3600;
+
+/// Page-segmentation modes tried in order, best-scoring result wins.
+/// 6 assumes one uniform block, which a job page with a sidebar is not;
+/// 3 is full auto page segmentation and 11 is sparse text, and which one
+/// wins genuinely varies by site.
+const PSM_MODES: [&str; 3] = ["6", "3", "11"];
+
+/// How much to enlarge an image before OCR. Returns 1.0 when the image is
+/// already big enough, and never enlarges past `MAX_SCALED_WIDTH`.
+fn scale_factor(width: u32, height: u32) -> f32 {
+    if width == 0 || height == 0 || width >= UPSCALE_BELOW_WIDTH {
+        return 1.0;
+    }
+    let wanted = 2.0_f32;
+    let capped = MAX_SCALED_WIDTH as f32 / width as f32;
+    wanted.min(capped).max(1.0)
+}
+
+/// True when the image is mostly dark, i.e. light text on a dark ground.
+fn is_dark(gray: &image::GrayImage) -> bool {
+    if gray.is_empty() {
+        return false;
+    }
+    let total: u64 = gray.pixels().map(|p| p.0[0] as u64).sum();
+    let mean = total as f32 / gray.len() as f32;
+    mean < DARK_MODE_THRESHOLD
+}
+
+/// Stretches the grey range to full black-to-white. UI screenshots often
+/// use mid-grey text on an off-white card, which OCRs worse than the same
+/// text at full contrast.
+fn stretch_contrast(gray: &mut image::GrayImage) {
+    let (mut lo, mut hi) = (255u8, 0u8);
+    for p in gray.pixels() {
+        lo = lo.min(p.0[0]);
+        hi = hi.max(p.0[0]);
+    }
+    if hi <= lo || (hi - lo) > 220 {
+        return; // already full-range, or a blank image
+    }
+    let span = (hi - lo) as f32;
+    for p in gray.pixels_mut() {
+        let v = ((p.0[0] - lo) as f32 / span * 255.0).round().clamp(0.0, 255.0);
+        p.0[0] = v as u8;
+    }
+}
+
+/// Grayscale, invert if dark-mode, stretch contrast, and upscale small
+/// images. Tesseract gets the raw screenshot otherwise, and these three
+/// things are where most of its accuracy on UI captures comes from.
+pub fn preprocess(image_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let decoded = image::load_from_memory(image_bytes)
+        .map_err(|e| format!("Could not read that image: {e}"))?;
+    let mut gray = decoded.to_luma8();
+
+    if is_dark(&gray) {
+        image::imageops::invert(&mut gray);
+    }
+    stretch_contrast(&mut gray);
+
+    let (w, h) = gray.dimensions();
+    let factor = scale_factor(w, h);
+    let scaled = if factor > 1.0 {
+        image::imageops::resize(
+            &gray,
+            (w as f32 * factor) as u32,
+            (h as f32 * factor) as u32,
+            image::imageops::FilterType::Lanczos3,
+        )
+    } else {
+        gray
+    };
+
+    let mut png = Vec::new();
+    image::DynamicImage::ImageLuma8(scaled)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(|e| format!("Could not encode the preprocessed image: {e}"))?;
+    Ok(png)
+}
+
 pub fn tesseract_available() -> bool {
     Command::new("tesseract")
         .arg("--version")
@@ -50,19 +142,68 @@ pub fn run_ocr(image_bytes: &[u8]) -> Result<Vec<OcrLine>, String> {
         );
     }
 
-    let extension = match image::guess_format(image_bytes) {
-        Ok(image::ImageFormat::Jpeg) => "jpg",
-        Ok(image::ImageFormat::WebP) => "webp",
-        Ok(image::ImageFormat::Gif) => "gif",
-        _ => "png",
+    // Preprocessing is where most of the accuracy on UI screenshots comes
+    // from. If it fails for any reason, fall back to the raw bytes rather
+    // than refusing to OCR at all.
+    let (bytes, extension) = match preprocess(image_bytes) {
+        Ok(png) => (png, "png"),
+        Err(_) => (
+            image_bytes.to_vec(),
+            match image::guess_format(image_bytes) {
+                Ok(image::ImageFormat::Jpeg) => "jpg",
+                Ok(image::ImageFormat::WebP) => "webp",
+                Ok(image::ImageFormat::Gif) => "gif",
+                _ => "png",
+            },
+        ),
     };
+
     let tmp_path = temp_image_path(extension);
-    std::fs::write(&tmp_path, image_bytes)
+    std::fs::write(&tmp_path, &bytes)
         .map_err(|e| format!("Could not write temporary image for OCR: {e}"))?;
 
-    let result = run_tesseract(&tmp_path);
+    let result = run_tesseract_best_of(&tmp_path);
     let _ = std::fs::remove_file(&tmp_path);
     result
+}
+
+/// Runs Tesseract in each page-segmentation mode and keeps whichever read
+/// the page best.
+///
+/// Which mode wins genuinely varies: a single-column posting does well
+/// under 6, a page with a sidebar under 3, a sparse confirmation screen
+/// under 11. Guessing one for everybody leaves accuracy on the table, and
+/// the runs are fast enough that trying three is not noticeable.
+fn run_tesseract_best_of(image_path: &std::path::Path) -> Result<Vec<OcrLine>, String> {
+    let mut best: Option<(f32, Vec<OcrLine>)> = None;
+    let mut last_error = None;
+
+    for psm in PSM_MODES {
+        match run_tesseract(image_path, psm) {
+            Ok(lines) => {
+                let score = reading_score(&lines);
+                if best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+                    best = Some((score, lines));
+                }
+            }
+            Err(e) => last_error = Some(e),
+        }
+    }
+
+    match best {
+        Some((_, lines)) => Ok(lines),
+        None => Err(last_error.unwrap_or_else(|| "Tesseract produced no output.".to_string())),
+    }
+}
+
+/// How much readable text a run produced. Total recognised characters
+/// across blocks - a mode that mis-segments the page returns fewer, shorter
+/// blocks, so this separates them without needing a second confidence pass.
+fn reading_score(lines: &[OcrLine]) -> f32 {
+    lines
+        .iter()
+        .map(|l| l.text.chars().filter(|c| !c.is_whitespace()).count() as f32)
+        .sum()
 }
 
 fn temp_image_path(extension: &str) -> PathBuf {
@@ -76,11 +217,11 @@ fn temp_image_path(extension: &str) -> PathBuf {
     ))
 }
 
-fn run_tesseract(image_path: &std::path::Path) -> Result<Vec<OcrLine>, String> {
+fn run_tesseract(image_path: &std::path::Path, psm: &str) -> Result<Vec<OcrLine>, String> {
     let output = Command::new("tesseract")
         .arg(image_path)
         .arg("stdout")
-        .args(["--psm", "6", "tsv"])
+        .args(["--psm", psm, "tsv"])
         .output()
         .map_err(|e| format!("Could not run tesseract: {e}"))?;
 
@@ -436,5 +577,136 @@ mod tests {
         assert_eq!(fields.company, None);
         assert_eq!(fields.position, None);
         assert_eq!(fields.notes, None);
+    }
+
+    // ---- preprocessing ----
+
+    fn solid(w: u32, h: u32, level: u8) -> image::GrayImage {
+        image::GrayImage::from_pixel(w, h, image::Luma([level]))
+    }
+
+    #[test]
+    fn a_dark_screenshot_is_recognised_as_dark() {
+        assert!(is_dark(&solid(10, 10, 20)), "near-black is dark mode");
+        assert!(is_dark(&solid(10, 10, 100)), "dark grey is dark mode");
+        assert!(!is_dark(&solid(10, 10, 200)), "a light page is not");
+        assert!(!is_dark(&solid(10, 10, 255)), "white is not");
+    }
+
+    #[test]
+    fn contrast_stretch_pulls_a_flat_range_to_full_black_and_white() {
+        // Mid-grey text on an off-white card: the exact case that OCRs badly.
+        let mut img = image::GrayImage::from_fn(4, 1, |x, _| {
+            image::Luma([[120u8, 140, 160, 180][x as usize]])
+        });
+        stretch_contrast(&mut img);
+        let out: Vec<u8> = img.pixels().map(|p| p.0[0]).collect();
+        assert_eq!(out[0], 0, "the darkest pixel becomes black");
+        assert_eq!(out[3], 255, "the lightest becomes white");
+        assert!(out[1] < out[2], "ordering is preserved");
+    }
+
+    #[test]
+    fn contrast_stretch_leaves_a_full_range_image_alone() {
+        let mut img = image::GrayImage::from_fn(2, 1, |x, _| {
+            image::Luma([if x == 0 { 0u8 } else { 255 }])
+        });
+        stretch_contrast(&mut img);
+        assert_eq!(img.get_pixel(0, 0).0[0], 0);
+        assert_eq!(img.get_pixel(1, 0).0[0], 255);
+    }
+
+    #[test]
+    fn contrast_stretch_does_not_divide_by_zero_on_a_blank_image() {
+        let mut img = solid(4, 4, 128);
+        stretch_contrast(&mut img);
+        assert!(img.pixels().all(|p| p.0[0] == 128), "a flat image is left as-is");
+    }
+
+    #[test]
+    fn small_screenshots_are_enlarged_and_large_ones_are_not() {
+        assert_eq!(scale_factor(800, 600), 2.0, "UI text this small needs upscaling");
+        assert_eq!(scale_factor(1599, 900), 2.0);
+        assert_eq!(scale_factor(1600, 900), 1.0, "already big enough");
+        assert_eq!(scale_factor(3840, 2160), 1.0, "a 4K capture is left alone");
+    }
+
+    #[test]
+    fn upscaling_is_capped_so_a_wide_image_is_not_blown_up() {
+        // 2x would exceed the ceiling, so the factor is reduced to fit.
+        let f = scale_factor(1900, 100);
+        assert_eq!(f, 1.0, "already at or past the upscale threshold");
+        let f = scale_factor(1500, 100);
+        assert!(f * 1500.0 <= MAX_SCALED_WIDTH as f32 + 1.0, "never past the ceiling");
+    }
+
+    #[test]
+    fn scale_factor_never_shrinks_or_divides_by_zero() {
+        assert_eq!(scale_factor(0, 0), 1.0);
+        assert_eq!(scale_factor(0, 100), 1.0);
+        assert!(scale_factor(10, 10) >= 1.0, "preprocessing must never shrink text");
+    }
+
+    #[test]
+    fn preprocess_returns_a_png_and_inverts_a_dark_capture() {
+        let mut dark = Vec::new();
+        image::DynamicImage::ImageLuma8(solid(40, 20, 15))
+            .write_to(&mut std::io::Cursor::new(&mut dark), image::ImageFormat::Png)
+            .unwrap();
+
+        let out = preprocess(&dark).expect("a valid image should preprocess");
+        assert_eq!(
+            image::guess_format(&out).unwrap(),
+            image::ImageFormat::Png,
+            "Tesseract is handed a PNG whatever came in"
+        );
+        let img = image::load_from_memory(&out).unwrap().to_luma8();
+        assert!(
+            img.get_pixel(0, 0).0[0] > 200,
+            "a dark-mode capture comes out light so Tesseract can read it"
+        );
+        let (w, _) = img.dimensions();
+        assert!(w > 40, "a small capture is enlarged, got width {w}");
+    }
+
+    #[test]
+    fn preprocess_reports_rather_than_panics_on_junk() {
+        assert!(preprocess(b"not an image at all").is_err());
+        assert!(preprocess(&[]).is_err());
+    }
+
+    // ---- page-segmentation selection ----
+
+    #[test]
+    fn the_run_that_read_the_most_text_wins() {
+        let sparse = vec![OcrLine { text: "Acme".into(), top: 0.0, height: 10.0 }];
+        let full = vec![
+            OcrLine { text: "Acme Corporation".into(), top: 0.0, height: 20.0 },
+            OcrLine { text: "Senior Engineer".into(), top: 30.0, height: 14.0 },
+        ];
+        assert!(
+            reading_score(&full) > reading_score(&sparse),
+            "a mode that segmented the page properly scores higher"
+        );
+    }
+
+    #[test]
+    fn whitespace_does_not_inflate_the_score() {
+        let padded = vec![OcrLine { text: "a b".into(), top: 0.0, height: 1.0 }];
+        let solid_text = vec![OcrLine { text: "abc".into(), top: 0.0, height: 1.0 }];
+        assert!(reading_score(&solid_text) > reading_score(&padded));
+    }
+
+    #[test]
+    fn an_empty_read_scores_zero() {
+        assert_eq!(reading_score(&[]), 0.0);
+    }
+
+    #[test]
+    fn every_segmentation_mode_is_tried() {
+        assert_eq!(PSM_MODES.len(), 3);
+        assert!(PSM_MODES.contains(&"6"), "single uniform block");
+        assert!(PSM_MODES.contains(&"3"), "auto page segmentation");
+        assert!(PSM_MODES.contains(&"11"), "sparse text");
     }
 }

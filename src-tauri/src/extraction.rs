@@ -40,6 +40,42 @@ const GEMINI_URL_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/
 
 const USER_PROMPT: &str = "Extract the job posting fields from this screenshot as JSON.";
 
+const TOOL_NAME: &str = "record_job_posting";
+
+/// The shape every provider is held to.
+///
+/// Asking for JSON in prose and hoping is what the ParseFailed path exists
+/// for; all three providers can enforce a schema instead, which removes the
+/// failure rather than handling it. Every field is nullable on purpose - a
+/// field that isn't visible must come back null, never invented.
+fn field_schema() -> serde_json::Value {
+    let nullable_string = serde_json::json!({ "type": ["string", "null"] });
+    let mut properties = serde_json::Map::new();
+    for key in [
+        "company",
+        "position",
+        "location",
+        "work_type",
+        "employment_type",
+        "salary_range",
+        "job_id",
+        "posted_date",
+        "url",
+        "notes",
+    ] {
+        properties.insert(key.to_string(), nullable_string.clone());
+    }
+    let required: Vec<&str> = properties.keys().map(|k| k.as_str()).collect();
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        // OpenAI's strict mode requires every property be listed as required;
+        // the null union above is what makes "not visible" expressible.
+        "required": required,
+        "additionalProperties": false
+    })
+}
+
 /// Each provider wants the same three things - a system prompt, an image, and
 /// a question - in its own shape. These build the body; the caller sends it.
 /// Keeping them pure means the wire format is covered by tests without a
@@ -49,6 +85,14 @@ fn claude_body(model: &str, image_base64: &str, media_type: &str) -> serde_json:
         "model": model,
         "max_tokens": 1024,
         "system": SYSTEM_PROMPT,
+        // A forced tool call is how Anthropic guarantees a shape: the model
+        // must call this tool, and its input is validated against the schema.
+        "tools": [{
+            "name": TOOL_NAME,
+            "description": "Record the fields visible in a job-posting screenshot.",
+            "input_schema": field_schema()
+        }],
+        "tool_choice": { "type": "tool", "name": TOOL_NAME },
         "messages": [{
             "role": "user",
             "content": [
@@ -64,6 +108,14 @@ fn openai_body(model: &str, image_base64: &str, media_type: &str) -> serde_json:
     serde_json::json!({
         "model": model,
         "max_tokens": 1024,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": TOOL_NAME,
+                "strict": true,
+                "schema": field_schema()
+            }
+        },
         "messages": [
             { "role": "system", "content": SYSTEM_PROMPT },
             { "role": "user", "content": [
@@ -85,22 +137,61 @@ fn gemini_body(model: &str, image_base64: &str, media_type: &str) -> serde_json:
                 { "inlineData": { "mimeType": media_type, "data": image_base64 } }
             ]
         }],
-        "generationConfig": { "maxOutputTokens": 1024 }
+        "generationConfig": {
+            "maxOutputTokens": 1024,
+            "responseMimeType": "application/json",
+            "responseSchema": gemini_schema()
+        }
     })
+}
+
+/// Gemini's schema dialect is OpenAPI-ish rather than JSON Schema: it has
+/// no type unions, so nullability is expressed with a `nullable` flag.
+fn gemini_schema() -> serde_json::Value {
+    let mut properties = serde_json::Map::new();
+    for key in [
+        "company",
+        "position",
+        "location",
+        "work_type",
+        "employment_type",
+        "salary_range",
+        "job_id",
+        "posted_date",
+        "url",
+        "notes",
+    ] {
+        properties.insert(
+            key.to_string(),
+            serde_json::json!({ "type": "STRING", "nullable": true }),
+        );
+    }
+    serde_json::json!({ "type": "OBJECT", "properties": properties })
 }
 
 /// Digs the assistant's text out of whichever response shape came back.
 /// Returns None rather than erroring so the caller can report the raw body.
 fn text_from_response(provider: &str, body: &serde_json::Value) -> Option<String> {
     match provider {
-        "claude" => body
-            .get("content")?
-            .as_array()?
-            .iter()
-            .find(|c| c.get("type").and_then(|t| t.as_str()) == Some("text"))
-            .and_then(|c| c.get("text"))
-            .and_then(|t| t.as_str())
-            .map(str::to_string),
+        "claude" => {
+            let blocks = body.get("content")?.as_array()?;
+            // The forced tool call puts the answer in `input` as an object.
+            // Falling back to a text block keeps this working if the model
+            // answers in prose anyway.
+            blocks
+                .iter()
+                .find(|c| c.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+                .and_then(|c| c.get("input"))
+                .map(|input| input.to_string())
+                .or_else(|| {
+                    blocks
+                        .iter()
+                        .find(|c| c.get("type").and_then(|t| t.as_str()) == Some("text"))
+                        .and_then(|c| c.get("text"))
+                        .and_then(|t| t.as_str())
+                        .map(str::to_string)
+                })
+        }
         "openai" => body
             .get("choices")?
             .as_array()?
@@ -400,5 +491,110 @@ mod tests {
         assert_eq!(provider_display_name("claude"), "Anthropic");
         assert_eq!(provider_display_name("openai"), "OpenAI");
         assert_eq!(provider_display_name("gemini"), "Gemini");
+    }
+
+    // ---- enforced output shape ----
+
+    #[test]
+    fn the_schema_covers_every_field_the_app_stores() {
+        let schema = field_schema();
+        let props = schema["properties"].as_object().unwrap();
+        for key in [
+            "company", "position", "location", "work_type", "employment_type",
+            "salary_range", "job_id", "posted_date", "url", "notes",
+        ] {
+            assert!(props.contains_key(key), "{key} missing from the schema");
+        }
+        assert_eq!(props.len(), 10, "no extra fields the model could invent");
+        assert_eq!(schema["additionalProperties"], false);
+    }
+
+    #[test]
+    fn every_field_may_be_null_so_nothing_has_to_be_invented() {
+        let schema = field_schema();
+        for (name, prop) in schema["properties"].as_object().unwrap() {
+            let types = prop["type"].as_array().unwrap();
+            assert!(
+                types.iter().any(|t| t == "null"),
+                "{name} must be nullable - a field that isn't visible comes back null"
+            );
+        }
+    }
+
+    #[test]
+    fn openai_strict_mode_needs_every_property_required() {
+        let schema = field_schema();
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            required.len(),
+            schema["properties"].as_object().unwrap().len(),
+            "strict mode rejects a schema that omits any property from required"
+        );
+    }
+
+    #[test]
+    fn claude_is_forced_to_call_the_recording_tool() {
+        let b = claude_body("m", "D", "image/png");
+        assert_eq!(b["tools"][0]["name"], TOOL_NAME);
+        assert_eq!(b["tool_choice"]["type"], "tool");
+        assert_eq!(
+            b["tool_choice"]["name"], TOOL_NAME,
+            "without forcing it the model may answer in prose instead"
+        );
+        assert!(b["tools"][0]["input_schema"]["properties"]["company"].is_object());
+    }
+
+    #[test]
+    fn openai_is_given_a_strict_json_schema() {
+        let b = openai_body("m", "D", "image/png");
+        assert_eq!(b["response_format"]["type"], "json_schema");
+        assert_eq!(b["response_format"]["json_schema"]["strict"], true);
+        assert!(b["response_format"]["json_schema"]["schema"]["properties"]["position"].is_object());
+    }
+
+    #[test]
+    fn gemini_is_given_a_response_schema_in_its_own_dialect() {
+        let b = gemini_body("m", "D", "image/png");
+        assert_eq!(b["generationConfig"]["responseMimeType"], "application/json");
+        let schema = &b["generationConfig"]["responseSchema"];
+        assert_eq!(schema["type"], "OBJECT", "Gemini uses upper-case type names");
+        assert_eq!(
+            schema["properties"]["company"]["nullable"], true,
+            "Gemini has no type unions - nullability is a flag"
+        );
+        assert_eq!(schema["properties"]["company"]["type"], "STRING");
+    }
+
+    #[test]
+    fn reads_claudes_tool_call() {
+        let body = serde_json::json!({
+            "content": [
+                { "type": "text", "text": "Let me look at that." },
+                { "type": "tool_use", "name": TOOL_NAME,
+                  "input": { "company": "Acme", "position": "Engineer" } }
+            ]
+        });
+        let text = text_from_response("claude", &body).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed["company"], "Acme");
+        assert_eq!(
+            parsed["position"], "Engineer",
+            "the tool input is preferred over any preamble text"
+        );
+    }
+
+    #[test]
+    fn still_reads_claude_answering_in_prose() {
+        // Belt and braces: if the tool call is ever absent, a text block
+        // is still understood rather than failing outright.
+        let body = serde_json::json!({
+            "content": [{ "type": "text", "text": "{\"company\":\"Acme\"}" }]
+        });
+        assert_eq!(text_from_response("claude", &body).unwrap(), "{\"company\":\"Acme\"}");
     }
 }
