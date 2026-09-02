@@ -81,8 +81,10 @@ about what a status looks like.
   source of truth and `tauri.conf.json` has no `version` field. A release
   whose version is not newer than what is installed is silently never offered
   as an update; the release workflow guards the tag against the crate version.
-- **Releases are drafts.** GitHub does not serve draft assets, so the updater
-  sees nothing until the release is published by hand.
+- **Never create a release from the tag page.** The workflow publishes the
+  release itself. Making one by hand from a tag creates a *second*, empty
+  release on that tag - GitHub allows it - and the installers CI built stay
+  attached to the other one.
 - **Updates are unsigned until a key exists.** `tauri.conf.json` carries a
   placeholder `pubkey`; `updates.rs` detects it and reports that plainly
   instead of failing with a signature error. See the README for the setup.

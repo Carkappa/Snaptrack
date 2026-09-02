@@ -89,8 +89,12 @@ jobs:
             Unsigned build - see the README for the Gatekeeper / SmartScreen
             warnings you'll need to click through on first launch.
 
-            Installed copies pick this up automatically once the release is
-            published (a draft release is not served to the updater).
-          releaseDraft: true
+            Installed copies pick this up automatically, once a signing
+            keypair is configured for the repository.
+          # Published straight away. Leaving it as a draft meant the tag and
+          # the built installers could drift apart - it is easy to "publish"
+          # from the tag page, which creates a second, empty release instead
+          # of releasing the one CI just built.
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }} ${{ steps.updater.outputs.args }}

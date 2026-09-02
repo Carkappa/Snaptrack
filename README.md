@@ -393,10 +393,10 @@ do.
    https://github.com/Carkappa/Snaptrack/releases/latest/download/latest.json
    ```
 
-**The release has to be published, not left as a draft.** The workflow
-creates releases as drafts on purpose so you can check the artifacts
-first; GitHub doesn't serve draft assets, so installed apps see nothing
-until you hit Publish.
+**Tagging is the whole process.** The workflow builds the installers,
+attaches them, and publishes the release. Don't create a release from the
+tag page yourself - that makes a second, empty release on the same tag and
+leaves the built installers behind.
 
 ### Bumping the version
 
