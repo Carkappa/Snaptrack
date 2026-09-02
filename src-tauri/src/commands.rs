@@ -612,8 +612,17 @@ pub fn set_excel_path<R: tauri::Runtime>(
     path: String,
     move_existing: bool,
 ) -> Result<PathChange, String> {
-    let old = resolve_excel_path(&app)?;
     let new = PathBuf::from(&path);
+
+    // Only resolved when a move is actually wanted, and never fatal.
+    // Setting a path must work even when the old one cannot be worked out -
+    // if the Documents folder is unavailable, choosing a location by hand is
+    // exactly the fix, and failing here would take that away.
+    let old = if move_existing {
+        resolve_excel_path(&app).ok()
+    } else {
+        None
+    };
 
     let store = app
         .store(STORE_FILE)
@@ -621,7 +630,7 @@ pub fn set_excel_path<R: tauri::Runtime>(
 
     let mut outcome = PathChange::Switched;
 
-    if move_existing && old.is_file() && old != new {
+    if let Some(old) = old.filter(|o| o.is_file() && *o != new) {
         if new.exists() {
             // Never clobber a workbook that is already there - it may be
             // the one being switched to on purpose.
