@@ -358,35 +358,52 @@ install it in place. This keeps the app's "no background work" promise:
   *install* puts the banner back into its actionable state and surfaces
   the same retry toast as a failed save.
 
-### Setting it up (repo owner, one time)
+### Regenerating the keypair (only if it is lost or compromised)
 
 Updates are signed, so the app will only install a build that came from
-your private key. Until that key exists nothing breaks: releases build
-without updater artifacts, and the app reports "no update signing key
-configured" instead of checking. You can ship and install perfectly well
-before setting this up — you just won't get automatic updates until you
-do.
+the project's private key. **This is configured** — the public key is in
+`tauri.conf.json` and CI holds the private half as a repository secret.
 
-1. Generate a keypair (keep the passphrase somewhere safe):
+A fork won't have those secrets, and nothing breaks there: releases build
+without updater artifacts and the app reports "no update signing key
+configured" instead of failing.
+
+Replacing the key means every installed copy stops accepting updates —
+they verify against the public key baked into the build they are running —
+so those users have to reinstall by hand once. Only do this if the private
+key is lost or exposed.
+
+1. Generate a keypair. Either the Tauri CLI, or minisign, which needs no
+   Rust toolchain:
 
    ```bash
-   cd src-tauri
-   cargo tauri signer generate -w ~/.tauri/snaptrack.key
+   minisign -G -W -p ~/.tauri/snaptrack.key.pub -s ~/.tauri/snaptrack.key
    ```
 
-2. Paste the **public** key it prints into `src-tauri/tauri.conf.json` as
-   `plugins.updater.pubkey` (it ships empty). This one is meant to be
-   committed.
+   `-W` makes it passwordless; the key is protected by being a repository
+   secret rather than by a passphrase. On Windows, normalise the files to
+   LF line endings — minisign writes CRLF, which the parser Tauri uses does
+   not strip.
+
+2. Put **base64 of the whole `.pub` file** into `src-tauri/tauri.conf.json`
+   as `plugins.updater.pubkey` — not the key line on its own. Tauri
+   base64-decodes that value and hands the result to minisign's parser,
+   which wants the full two-line file. This one is meant to be committed.
 
 3. Add two repository secrets (Settings → Secrets and variables →
    Actions) so CI can sign each release:
 
    | Secret | Value |
    | --- | --- |
-   | `TAURI_SIGNING_PRIVATE_KEY` | contents of `~/.tauri/snaptrack.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the passphrase you chose |
+   | `TAURI_SIGNING_PRIVATE_KEY` | **base64 of** `~/.tauri/snaptrack.key` |
+   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the passphrase, or empty for `-W` |
 
-   Never commit the private key itself.
+   ```bash
+   base64 -w0 ~/.tauri/snaptrack.key | gh secret set TAURI_SIGNING_PRIVATE_KEY
+   ```
+
+   Never commit the private key itself, and keep a backup of it somewhere
+   safe — losing it is what forces every user to reinstall.
 
 4. Tag and push a release as usual. The workflow bundles the installers,
    signs them, and attaches a `latest.json` manifest — which is what the
