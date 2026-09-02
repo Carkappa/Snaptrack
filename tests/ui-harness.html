@@ -250,7 +250,33 @@
       }),
       learn_ocr_hints: () => null,
       extract_with_ollama: () => HANDLERS.extract_with_local_ocr(),
-      ollama_status: () => state.ollama,
+      ollama_status: () => {
+        // Mirrors best_available_model: whatever is pulled beats asking for
+        // a download.
+        const usable = state.ollama.models.filter((m) => !m.toLowerCase().includes("embed"));
+        const preferred = state.models.ollama || "qwen2.5:3b";
+        const fam = (m) => m.split(":")[0].toLowerCase();
+        const chosen =
+          usable.find((m) => m === preferred) ||
+          usable.find((m) => fam(m) === fam(preferred)) ||
+          usable[0];
+        return {
+          running: state.ollama.running,
+          models: usable,
+          model: chosen || preferred,
+          model_ready: state.ollama.running && !!chosen,
+          recommended: "qwen2.5:3b",
+        };
+      },
+      pull_ollama_model: async ({ model }) => {
+        for (const [completed, total] of [[0, 0], [25, 100], [100, 100]]) {
+          state.listeners["ollama-pull-progress"]?.forEach((fn) =>
+            fn({ payload: { status: "pulling manifest", completed, total } })
+          );
+        }
+        state.ollama.models.push(model);
+        return null;
+      },
       get_ollama_host: () => state.ollamaHost,
       set_ollama_host: ({ host }) => {
         state.ollamaHost = host.trim() || "http://localhost:11434";

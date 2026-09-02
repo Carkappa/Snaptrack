@@ -65,14 +65,10 @@ Windows, tick **Add to PATH** during setup.
 Tesseract reads the screenshot, then a model on your own machine works out
 which words are the company and which are the title. That's language rather
 than layout, so it copes with job boards no layout rule was written for.
-Needs Tesseract and Ollama installed, plus a pulled model:
-
-```bash
-ollama pull qwen2.5:3b
-```
-
-A 3B model runs on a CPU in a second or two. Settings shows whether Ollama is
-reachable and whether the model is pulled.
+Needs Tesseract and Ollama installed — nothing else to configure. Settings
+picks up whatever model you already have; if you have none it offers a
+**Download model** button, so you never need a terminal. A 3B model is about
+2 GB and runs on a CPU in a second or two.
 
 **Claude, ChatGPT or Gemini** — meaningfully more accurate, because they read
 the page the way you would. Pick one in Settings and paste in an API key for

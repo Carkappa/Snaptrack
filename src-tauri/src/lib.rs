@@ -180,6 +180,7 @@ pub fn run() {
             commands::learn_ocr_hints,
             commands::extract_with_ollama,
             commands::ollama_status,
+            commands::pull_ollama_model,
             commands::get_ollama_host,
             commands::set_ollama_host,
             commands::get_app_version,

@@ -329,6 +329,19 @@
         <div class="settings-group" id="ollama-group" hidden>
           <h2>Ollama</h2>
           <p id="ollama-status" class="hint">Checking&hellip;</p>
+          <div id="ollama-model-row" hidden>
+            <label for="settings-ollama-model" class="settings-sublabel">Model</label>
+            <select id="settings-ollama-model"></select>
+          </div>
+
+          <div id="ollama-pull-row" hidden>
+            <button id="ollama-pull" class="btn btn-primary btn-small">Download model</button>
+            <div id="ollama-pull-progress" class="update-progress" hidden>
+              <div id="ollama-pull-bar" class="update-progress-bar"></div>
+            </div>
+            <p id="ollama-pull-status" class="hint" hidden></p>
+          </div>
+
           <label for="settings-ollama-host" class="settings-sublabel">Server</label>
           <div class="path-row">
             <input id="settings-ollama-host" type="text" autocomplete="off" spellcheck="false"

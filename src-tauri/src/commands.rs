@@ -315,31 +315,51 @@ pub fn set_ollama_host<R: tauri::Runtime>(
 /// Whether Ollama is running, and which models it has pulled - so Settings
 /// can say "running, but you have not pulled that model" rather than
 /// failing at capture time.
+/// What Ollama has pulled, or None when it isn't reachable at all - which
+/// is a different problem from having no models, and gets a different
+/// message.
+async fn installed_models(host: &str) -> Option<Vec<String>> {
+    let url = format!("{}/api/tags", host.trim_end_matches('/'));
+    let response = reqwest::Client::new().get(&url).send().await.ok()?;
+    let body = response.json::<serde_json::Value>().await.ok()?;
+    Some(
+        body.get("models")?
+            .as_array()?
+            .iter()
+            .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(str::to_string))
+            .collect(),
+    )
+}
+
 #[tauri::command]
 pub async fn ollama_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> OllamaStatus {
     let host = resolve_ollama_host(&app);
-    let url = format!("{}/api/tags", host.trim_end_matches('/'));
-    let Ok(response) = reqwest::Client::new().get(&url).send().await else {
+    let preferred = resolve_model(&app, "ollama");
+
+    let Some(models) = installed_models(&host).await else {
         return OllamaStatus {
             running: false,
             models: Vec::new(),
+            model: preferred,
+            model_ready: false,
+            recommended: crate::models::provider_or_default("ollama").default_model,
         };
     };
-    let models = response
-        .json::<serde_json::Value>()
-        .await
-        .ok()
-        .and_then(|v| v.get("models").cloned())
-        .and_then(|m| m.as_array().cloned())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
+
+    // Whatever is already pulled beats making the user download something.
+    let chosen = crate::models::best_available_model(&preferred, &models);
+    // Only models that can actually be picked are offered: an embedding
+    // model in the list is a trap, since choosing it fails at capture time.
+    let models = models
+        .into_iter()
+        .filter(|m| !m.to_lowercase().contains("embed"))
+        .collect();
     OllamaStatus {
         running: true,
+        model_ready: chosen.is_some(),
+        model: chosen.unwrap_or_else(|| preferred.clone()),
         models,
+        recommended: crate::models::provider_or_default("ollama").default_model,
     }
 }
 
@@ -347,6 +367,73 @@ pub async fn ollama_status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Ollam
 pub struct OllamaStatus {
     pub running: bool,
     pub models: Vec<String>,
+    /// The model that would actually be used right now.
+    pub model: String,
+    /// False when nothing usable is pulled, so the UI offers to fetch one.
+    pub model_ready: bool,
+    /// What to pull when there is nothing.
+    pub recommended: String,
+}
+
+/// Downloads a model, reporting progress, so nobody has to open a terminal.
+///
+/// Ollama streams newline-delimited JSON for this; the bytes arrive in
+/// arbitrary chunks, so lines are reassembled across chunk boundaries
+/// rather than assuming one chunk is one line.
+#[tauri::command]
+pub async fn pull_ollama_model<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    model: String,
+) -> Result<(), String> {
+    use tauri::Emitter;
+
+    let host = resolve_ollama_host(&app);
+    let url = format!("{}/api/pull", host.trim_end_matches('/'));
+    let mut response = reqwest::Client::new()
+        .post(&url)
+        .json(&serde_json::json!({ "model": model, "stream": true }))
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach Ollama at {host}: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Ollama refused to pull '{model}' ({status}): {body}"));
+    }
+
+    let mut buffer = String::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("The download stopped: {e}"))?
+    {
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(newline) = buffer.find('
+') {
+            let line: String = buffer.drain(..=newline).collect();
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if let Some(error) = value.get("error").and_then(|e| e.as_str()) {
+                return Err(format!("Ollama couldn't pull '{model}': {error}"));
+            }
+            let _ = app.emit(
+                "ollama-pull-progress",
+                serde_json::json!({
+                    "status": value.get("status").and_then(|s| s.as_str()).unwrap_or(""),
+                    "completed": value.get("completed").and_then(|c| c.as_u64()).unwrap_or(0),
+                    "total": value.get("total").and_then(|t| t.as_u64()).unwrap_or(0),
+                }),
+            );
+        }
+    }
+
+    Ok(())
 }
 
 /// Reads the screenshot with Tesseract, then has a local model pick the
@@ -381,7 +468,19 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
 "));
 
     let host = resolve_ollama_host(&app);
-    let model = resolve_model(&app, "ollama");
+    let preferred = resolve_model(&app, "ollama");
+    // Use whatever is actually pulled rather than failing on a model the
+    // user never asked for and does not have.
+    let model = match installed_models(&host).await {
+        Some(models) => crate::models::best_available_model(&preferred, &models)
+            .ok_or_else(|| {
+                format!(
+                    "Ollama is running but has no usable model. Pull one first: `ollama pull {}`",
+                    crate::models::provider_or_default("ollama").default_model
+                )
+            })?,
+        None => preferred,
+    };
     let result = extraction::extract_fields_from_text(&host, &model, &blocks.join("
 ")).await?;
 

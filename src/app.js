@@ -99,6 +99,13 @@
     modelGroup: el("model-group"),
     ollamaGroup: el("ollama-group"),
     ollamaStatus: el("ollama-status"),
+    ollamaModelRow: el("ollama-model-row"),
+    settingsOllamaModel: el("settings-ollama-model"),
+    ollamaPullRow: el("ollama-pull-row"),
+    ollamaPull: el("ollama-pull"),
+    ollamaPullProgress: el("ollama-pull-progress"),
+    ollamaPullBar: el("ollama-pull-bar"),
+    ollamaPullStatus: el("ollama-pull-status"),
     settingsOllamaHost: el("settings-ollama-host"),
     settingsOllamaSave: el("settings-ollama-save"),
     settingsOllamaReset: el("settings-ollama-reset"),
@@ -1351,8 +1358,11 @@
   /// Shown for anything that runs a model, key or no key.
   async function renderModelSection() {
     const provider = currentProvider();
-    dom.modelGroup.hidden = !provider.default_model;
-    if (provider.default_model) await loadModel();
+    // Ollama gets a picker of what is actually pulled instead, in its own
+    // card - a free-text model name there is a way to typo yourself into
+    // "model not found".
+    dom.modelGroup.hidden = !provider.default_model || provider.id === "ollama";
+    if (!dom.modelGroup.hidden) await loadModel();
   }
 
   async function renderOllamaSection() {
@@ -1367,6 +1377,8 @@
     await refreshOllamaStatus();
   }
 
+  /// Reports the three states that need different actions, and picks a
+  /// model out of what is already pulled so nothing has to be typed.
   async function refreshOllamaStatus() {
     dom.ollamaStatus.textContent = "Checking…";
     let status;
@@ -1376,18 +1388,71 @@
       dom.ollamaStatus.textContent = `Couldn't check Ollama: ${e}`;
       return;
     }
+
+    dom.ollamaModelRow.hidden = !status.model_ready;
+    dom.ollamaPullRow.hidden = status.model_ready || !status.running;
+
     if (!status.running) {
       dom.ollamaStatus.textContent =
-        "Not reachable. Install Ollama from ollama.com, then run `ollama serve`.";
+        "Not reachable. Install Ollama from ollama.com - it starts itself once installed.";
       return;
     }
-    const wanted = dom.settingsModel.value.trim() || currentProvider().default_model;
-    // Ollama reports "qwen2.5:3b"; a model set without a tag still matches.
-    const pulled = status.models.some((m) => m === wanted || m.split(":")[0] === wanted.split(":")[0]);
-    dom.ollamaStatus.textContent = pulled
-      ? "Running, with " + wanted + " pulled. Screenshots stay on this machine."
-      : "Running, but " + wanted + " isn't pulled yet - run: ollama pull " + wanted;
+    if (!status.model_ready) {
+      dom.ollamaStatus.textContent = `Running, but no model is downloaded yet. ${status.recommended} is about 2 GB and runs on a CPU.`;
+      dom.ollamaPull.textContent = `Download ${status.recommended}`;
+      return;
+    }
+
+    dom.settingsOllamaModel.innerHTML = status.models
+      .map(
+        (m) =>
+          `<option value="${escapeHtml(m)}" ${m === status.model ? "selected" : ""}>${escapeHtml(m)}</option>`
+      )
+      .join("");
+    dom.ollamaStatus.textContent = `Ready, using ${status.model}. Screenshots stay on this machine.`;
   }
+
+  dom.settingsOllamaModel.addEventListener("change", async () => {
+    try {
+      await invoke("set_model", { provider: "ollama", model: dom.settingsOllamaModel.value });
+      await refreshOllamaStatus();
+    } catch (e) {
+      dom.ollamaStatus.textContent = String(e);
+    }
+  });
+
+  listen("ollama-pull-progress", (event) => {
+    const { status, completed, total } = event.payload || {};
+    dom.ollamaPullStatus.hidden = false;
+    if (total > 0) {
+      const pct = Math.min(100, Math.round((completed / total) * 100));
+      dom.ollamaPullBar.classList.remove("indeterminate");
+      dom.ollamaPullBar.style.width = `${pct}%`;
+      dom.ollamaPullStatus.textContent = `${status} - ${pct}%`;
+    } else {
+      dom.ollamaPullBar.classList.add("indeterminate");
+      dom.ollamaPullStatus.textContent = status || "Downloading…";
+    }
+  });
+
+  dom.ollamaPull.addEventListener("click", async () => {
+    const model = dom.ollamaPull.textContent.replace("Download ", "").trim();
+    dom.ollamaPull.disabled = true;
+    dom.ollamaPullProgress.hidden = false;
+    dom.ollamaPullStatus.hidden = false;
+    dom.ollamaPullStatus.textContent = "Starting…";
+    try {
+      await invoke("pull_ollama_model", { model });
+      dom.ollamaPullStatus.textContent = `${model} downloaded.`;
+      await refreshOllamaStatus();
+    } catch (e) {
+      dom.ollamaPullStatus.textContent = String(e);
+    } finally {
+      dom.ollamaPull.disabled = false;
+      dom.ollamaPullProgress.hidden = true;
+      dom.ollamaPullBar.style.width = "0%";
+    }
+  });
 
   dom.settingsOllamaSave.addEventListener("click", async () => {
     try {

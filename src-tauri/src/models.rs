@@ -56,6 +56,107 @@ impl ExtractionProvider {
 
 pub const DEFAULT_PROVIDER: &str = "tesseract";
 
+/// Models known to be small, fast on a CPU, and good at returning JSON,
+/// best first. Used only to choose among what the user already has pulled.
+const MODEL_PREFERENCE: [&str; 6] = [
+    "qwen2.5", "llama3.2", "llama3.1", "mistral", "phi3", "gemma2",
+];
+
+/// Picks a usable model out of what Ollama has actually pulled.
+///
+/// The point is that nothing has to be typed: a user who already has any
+/// reasonable model should not be told to download another one, and a user
+/// who has none should be told that rather than getting "model not found"
+/// at the moment they paste a screenshot.
+///
+/// Embedding models are excluded - they cannot hold a conversation, so they
+/// would fail in a way that looks like a bug in the app.
+pub fn best_available_model(preferred: &str, installed: &[String]) -> Option<String> {
+    let usable: Vec<&String> = installed
+        .iter()
+        .filter(|m| !m.to_lowercase().contains("embed"))
+        .collect();
+    if usable.is_empty() {
+        return None;
+    }
+
+    let family = |m: &str| m.split(':').next().unwrap_or(m).to_lowercase();
+    let want = family(preferred);
+
+    // Exactly what was asked for, tag and all.
+    if let Some(m) = usable.iter().find(|m| m.as_str() == preferred) {
+        return Some((*m).clone());
+    }
+    // The same model at a different tag: qwen2.5:7b will do when the
+    // default was qwen2.5:3b.
+    if let Some(m) = usable.iter().find(|m| family(m) == want) {
+        return Some((*m).clone());
+    }
+    // Otherwise the best of what is there.
+    for pref in MODEL_PREFERENCE {
+        if let Some(m) = usable.iter().find(|m| family(m).starts_with(pref)) {
+            return Some((*m).clone());
+        }
+    }
+    Some(usable[0].clone())
+}
+
+#[cfg(test)]
+mod model_choice_tests {
+    use super::*;
+
+    fn installed(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_exact_model_wins_when_it_is_there() {
+        let got = best_available_model("qwen2.5:3b", &installed(&["llama3.2", "qwen2.5:3b"]));
+        assert_eq!(got.as_deref(), Some("qwen2.5:3b"));
+    }
+
+    #[test]
+    fn a_different_tag_of_the_same_model_is_good_enough() {
+        let got = best_available_model("qwen2.5:3b", &installed(&["qwen2.5:7b"]));
+        assert_eq!(
+            got.as_deref(),
+            Some("qwen2.5:7b"),
+            "no reason to make someone download a second copy of the same model"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_best_of_what_is_pulled() {
+        let got = best_available_model("qwen2.5:3b", &installed(&["gemma2", "llama3.2"]));
+        assert_eq!(got.as_deref(), Some("llama3.2"), "ranked ahead of gemma2");
+    }
+
+    #[test]
+    fn an_unranked_model_is_still_used_rather_than_nothing() {
+        let got = best_available_model("qwen2.5:3b", &installed(&["some-new-model:latest"]));
+        assert_eq!(got.as_deref(), Some("some-new-model:latest"));
+    }
+
+    #[test]
+    fn embedding_models_are_never_chosen() {
+        // These cannot chat; picking one fails in a way that looks like a
+        // bug in the app rather than the wrong model.
+        assert_eq!(
+            best_available_model("qwen2.5:3b", &installed(&["nomic-embed-text", "mxbai-embed-large"])),
+            None
+        );
+        assert_eq!(
+            best_available_model("qwen2.5:3b", &installed(&["nomic-embed-text", "llama3.2"])).as_deref(),
+            Some("llama3.2")
+        );
+    }
+
+    #[test]
+    fn nothing_pulled_means_nothing_chosen() {
+        assert_eq!(best_available_model("qwen2.5:3b", &[]), None);
+    }
+}
+
 pub fn extraction_providers() -> Vec<ExtractionProvider> {
     vec![
         ExtractionProvider::new(
