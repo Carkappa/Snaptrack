@@ -114,6 +114,13 @@ jobs:
             `.app.tar.gz`, `.sig` and `latest.json` files are used by the
             app to update itself - you do not need to download them.
 
+            On a Mac, Homebrew picks the right build for you:
+
+            ```bash
+            brew tap Carkappa/snaptrack https://github.com/Carkappa/Snaptrack
+            brew install --cask job-tracker
+            ```
+
             Installed copies pick this up automatically.
 
             The build is not code-signed, so Windows SmartScreen and macOS

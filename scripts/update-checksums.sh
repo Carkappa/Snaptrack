@@ -36,13 +36,17 @@ fetch_sha() {
 
 echo "Fetching v$version installers..."
 exe_sha="$(fetch_sha "Job.Tracker_${version}_x64-setup.exe")"
-dmg_sha="$(fetch_sha "Job.Tracker_${version}_aarch64.dmg")"
+arm_sha="$(fetch_sha "Job.Tracker_${version}_aarch64.dmg")"
+intel_sha="$(fetch_sha "Job.Tracker_${version}_x64.dmg")"
 
-perl -pi -e "s/^  sha256 .*/  sha256 \"$dmg_sha\"/" Casks/job-tracker.rb
+# The Cask carries one hash per Mac architecture.
+perl -pi -e "s/^  sha256 arm:.*/  sha256 arm:   \"$arm_sha\",/" Casks/job-tracker.rb
+perl -pi -e "s/^         intel:.*/         intel: \"$intel_sha\"/" Casks/job-tracker.rb
 perl -pi -e "s/^(\s*)\"hash\": \".*\"/\${1}\"hash\": \"$exe_sha\"/" bucket/job-tracker.json
 
 echo
-echo "Casks/job-tracker.rb     sha256 $dmg_sha"
-echo "bucket/job-tracker.json  hash   $exe_sha"
+echo "Casks/job-tracker.rb     arm   $arm_sha"
+echo "                         intel $intel_sha"
+echo "bucket/job-tracker.json  hash  $exe_sha"
 echo
 echo "Commit these - the install paths do not verify anything until you do."

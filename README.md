@@ -14,7 +14,15 @@ pick a cloud model.
 irm https://raw.githubusercontent.com/Carkappa/Snaptrack/main/scripts/install.ps1 | iex
 ```
 
-**macOS** (Apple Silicon or Intel):
+**macOS** — Homebrew, if you have it. Picks the right build for Apple
+Silicon or Intel:
+
+```bash
+brew tap Carkappa/snaptrack https://github.com/Carkappa/Snaptrack
+brew install --cask job-tracker
+```
+
+Or without Homebrew:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Carkappa/Snaptrack/main/scripts/install.sh | bash
