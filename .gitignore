@@ -6,4 +6,4 @@ node_modules
 *.log
 dist
 .env
-src-tauri/updater.conf.json
+updater.conf.json

@@ -59,12 +59,13 @@ jobs:
       - name: Enable updater artifacts when a signing key is configured
         id: updater
         shell: bash
-        working-directory: src-tauri
         env:
           SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if [ -n "$SIGNING_KEY" ]; then
             printf '{"bundle":{"createUpdaterArtifacts":true}}' > updater.conf.json
+            # tauri-action resolves --config from the repo root, not from
+            # src-tauri, so the file has to live here.
             echo "args=--config updater.conf.json" >> "$GITHUB_OUTPUT"
             echo "Signing key present - updater artifacts will be built and signed."
           else
