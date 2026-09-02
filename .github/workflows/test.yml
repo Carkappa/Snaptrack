@@ -37,9 +37,11 @@ jobs:
       # Deliberately not --verbose: it prints a full rustc invocation per
       # crate, which buries the actual compile error under thousands of
       # lines when something does break.
+      # --locked fails rather than silently rewriting Cargo.lock, so the
+      # committed lock cannot drift out of date again without CI saying so.
       - name: cargo test
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --locked
 
       # Cargo resolves and rewrites the lockfile here whether or not the
       # committed one was current. Publishing it means a machine without a
