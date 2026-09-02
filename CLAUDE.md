@@ -84,6 +84,10 @@ about what a status looks like.
   source of truth and `tauri.conf.json` has no `version` field. A release
   whose version is not newer than what is installed is silently never offered
   as an update; the release workflow guards the tag against the crate version.
+- **`Cargo.lock` carries the crate's own version, and CI builds `--locked`.**
+  A version bump that misses it fails the build on a one-line staleness that
+  looks like dependency drift and is not. `set-version.sh` handles it; check
+  it still does if you touch that script.
 - **Two files carry the version in more than one place.** Scoop's manifest
   repeats it inside the download URL, and that is not the `"version"` field;
   they drifted apart for five releases, leaving `scoop install` pointing at a

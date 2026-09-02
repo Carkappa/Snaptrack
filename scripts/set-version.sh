@@ -29,6 +29,12 @@ cd "$repo_root"
 
 # Only the [package] version at the top of the file, never a dependency's.
 perl -0pi -e "s/^version = \"[^\"]*\"/version = \"$version\"/m" src-tauri/Cargo.toml
+
+# Cargo.lock records the crate's own version too, and CI runs with --locked,
+# which refuses to update the lock rather than silently rewriting it. Missing
+# this makes every release bump fail the build on a one-line staleness.
+perl -0pi -e "s/(name = \"job-tracker\"
+version = \")[^\"]*(\")/\${1}$version\${2}/" src-tauri/Cargo.lock
 perl -pi -e "s/^  version \"[^\"]*\"/  version \"$version\"/" Casks/job-tracker.rb
 perl -pi -e "s/^    \"version\": \"[^\"]*\"/    \"version\": \"$version\"/" bucket/job-tracker.json
 
@@ -40,6 +46,7 @@ perl -pi -e "s{releases/download/v[^/]+/Job\.Tracker_[^_]+_x64-setup\.exe}{relea
 
 echo "Set version to $version in:"
 echo "  src-tauri/Cargo.toml   (source of truth; tauri.conf.json inherits it)"
+echo "  src-tauri/Cargo.lock   (the crate's own entry; CI builds --locked)"
 echo "  Casks/job-tracker.rb"
 echo "  bucket/job-tracker.json   (version and download URL)"
 echo
