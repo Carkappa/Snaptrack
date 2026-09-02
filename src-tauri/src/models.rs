@@ -11,6 +11,141 @@ pub const STATUSES: [&str; 6] = [
     "Withdrawn",
 ];
 
+/// One way of turning a screenshot into fields.
+///
+/// The frontend renders both the method dropdown and the API-key card from
+/// this list, so adding a provider here is all it takes for the UI to offer
+/// it - and a provider that needs no key (Tesseract) shows no key UI at all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtractionProvider {
+    pub id: String,
+    pub label: String,
+    /// Whether this provider sends anything over the network at all.
+    pub needs_key: bool,
+    /// Shown as the heading of the key card, e.g. "Anthropic API key".
+    pub key_label: String,
+    pub key_placeholder: String,
+    /// Where to get one. Shown under the field.
+    pub key_help: String,
+}
+
+impl ExtractionProvider {
+    fn new(
+        id: &str,
+        label: &str,
+        needs_key: bool,
+        key_label: &str,
+        key_placeholder: &str,
+        key_help: &str,
+    ) -> Self {
+        Self {
+            id: id.to_string(),
+            label: label.to_string(),
+            needs_key,
+            key_label: key_label.to_string(),
+            key_placeholder: key_placeholder.to_string(),
+            key_help: key_help.to_string(),
+        }
+    }
+}
+
+pub const DEFAULT_PROVIDER: &str = "tesseract";
+
+pub fn extraction_providers() -> Vec<ExtractionProvider> {
+    vec![
+        ExtractionProvider::new(
+            "tesseract",
+            "Tesseract - free, offline, no key",
+            false,
+            "",
+            "",
+            "",
+        ),
+        ExtractionProvider::new(
+            "claude",
+            "Claude (Anthropic)",
+            true,
+            "Anthropic API key",
+            "sk-ant-...",
+            "Create one at console.anthropic.com under API Keys.",
+        ),
+        ExtractionProvider::new(
+            "openai",
+            "ChatGPT (OpenAI)",
+            true,
+            "OpenAI API key",
+            "sk-...",
+            "Create one at platform.openai.com/api-keys.",
+        ),
+        ExtractionProvider::new(
+            "gemini",
+            "Gemini (Google)",
+            true,
+            "Google AI Studio API key",
+            "AIza...",
+            "Create one at aistudio.google.com/apikey.",
+        ),
+    ]
+}
+
+pub fn find_provider(id: &str) -> Option<ExtractionProvider> {
+    extraction_providers().into_iter().find(|p| p.id == id)
+}
+
+/// Falls back to Tesseract for an id this build doesn't know - a settings
+/// file written by a newer version, say. Never leaves the app without a
+/// working extraction method.
+pub fn provider_or_default(id: &str) -> ExtractionProvider {
+    find_provider(id).unwrap_or_else(|| {
+        find_provider(DEFAULT_PROVIDER).expect("the default provider must exist")
+    })
+}
+
+#[cfg(test)]
+mod provider_tests {
+    use super::*;
+
+    #[test]
+    fn tesseract_is_the_default_and_needs_no_key() {
+        let p = provider_or_default(DEFAULT_PROVIDER);
+        assert_eq!(p.id, "tesseract");
+        assert!(!p.needs_key);
+        assert!(
+            p.key_label.is_empty(),
+            "an offline provider must carry no key wording for the UI to show"
+        );
+    }
+
+    #[test]
+    fn every_cloud_provider_describes_its_own_key() {
+        for p in extraction_providers().into_iter().filter(|p| p.needs_key) {
+            assert!(!p.key_label.is_empty(), "{} needs a key heading", p.id);
+            assert!(!p.key_placeholder.is_empty(), "{} needs a placeholder", p.id);
+            assert!(!p.key_help.is_empty(), "{} needs a hint", p.id);
+            assert!(
+                !p.key_label.to_lowercase().contains("anthropic") || p.id == "claude",
+                "only Claude's card may mention Anthropic"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_ids_are_unique() {
+        let ids: Vec<String> = extraction_providers().into_iter().map(|p| p.id).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(ids.len(), sorted.len());
+    }
+
+    #[test]
+    fn an_unknown_provider_falls_back_rather_than_breaking() {
+        assert_eq!(provider_or_default("some-future-model").id, "tesseract");
+        assert_eq!(provider_or_default("").id, "tesseract");
+        assert!(find_provider("some-future-model").is_none());
+    }
+}
+
 /// A status the user can apply to an application.
 ///
 /// `kind` is what keeps the response-rate figure meaningful once the list is

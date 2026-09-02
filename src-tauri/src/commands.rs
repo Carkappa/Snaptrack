@@ -9,7 +9,9 @@ use tauri_plugin_store::StoreExt;
 const STORE_FILE: &str = "settings.json";
 const EXCEL_PATH_KEY: &str = "excel_path";
 const EXTRACTION_METHOD_KEY: &str = "extraction_method";
-const DEFAULT_EXTRACTION_METHOD: &str = "tesseract";
+const DEFAULT_EXTRACTION_METHOD: &str = crate::models::DEFAULT_PROVIDER;
+const HOTKEY_KEY: &str = "capture_hotkey";
+const SEEN_WELCOME_KEY: &str = "seen_welcome";
 const STATUS_DEFS_KEY: &str = "status_defs";
 const UPDATE_CHECK_ENABLED_KEY: &str = "update_check_enabled";
 const AUTO_INSTALL_UPDATES_KEY: &str = "auto_install_updates";
@@ -92,28 +94,44 @@ pub fn set_status_defs<R: tauri::Runtime>(
     Ok(cleaned)
 }
 
+/// Everything the Settings tab needs to render the method dropdown and the
+/// key card, including which providers have a key stored.
 #[tauri::command]
-pub fn has_api_key() -> bool {
-    keychain::has_api_key()
+pub fn get_extraction_providers() -> Vec<crate::models::ExtractionProvider> {
+    crate::models::extraction_providers()
 }
 
 #[tauri::command]
-pub fn save_api_key(key: String) -> Result<(), String> {
-    keychain::set_api_key(&key)
+pub fn has_api_key(provider: String) -> bool {
+    keychain::has_api_key(&provider)
 }
 
 #[tauri::command]
-pub fn delete_api_key() -> Result<(), String> {
-    keychain::delete_api_key()
+pub fn save_api_key(provider: String, key: String) -> Result<(), String> {
+    keychain::set_api_key(&provider, &key)
 }
 
 #[tauri::command]
-pub async fn extract_from_image(
+pub fn delete_api_key(provider: String) -> Result<(), String> {
+    keychain::delete_api_key(&provider)
+}
+
+#[tauri::command]
+pub async fn extract_from_image<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     image_base64: String,
     media_type: String,
 ) -> Result<ExtractionResult, String> {
-    let api_key = keychain::get_api_key()?;
-    extraction::extract_fields_from_image(&api_key, &image_base64, &media_type).await
+    let method = get_extraction_method(app)?;
+    let provider = crate::models::provider_or_default(&method);
+    if !provider.needs_key {
+        return Err(format!(
+            "{} does not use an API key - this command is for the cloud providers.",
+            provider.label
+        ));
+    }
+    let api_key = keychain::get_api_key(&provider.id)?;
+    extraction::extract_fields_from_image(&provider.id, &api_key, &image_base64, &media_type).await
 }
 
 #[tauri::command]
@@ -764,4 +782,69 @@ mod tests {
             assert!(validated_http_url(raw).is_err(), "should refuse {raw:?}");
         }
     }
+}
+
+/// The shortcut that shows the capture window, as a Tauri accelerator
+/// string such as "Ctrl+Shift+J". Falls back to the platform default.
+#[tauri::command]
+pub fn get_hotkey<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> String {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(HOTKEY_KEY))
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| crate::default_hotkey().to_string())
+}
+
+/// Re-registers the global shortcut, keeping the old one if the new one
+/// can't be taken (another app already owns it, or it isn't a valid
+/// accelerator). Returns the shortcut actually in force.
+#[tauri::command]
+pub fn set_hotkey<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    shortcut: String,
+) -> Result<String, String> {
+    let previous = get_hotkey(app.clone());
+    let wanted = shortcut.trim().to_string();
+    if wanted.is_empty() {
+        return Err("Pick a shortcut first.".to_string());
+    }
+
+    crate::register_capture_shortcut(&app, &wanted).map_err(|e| {
+        // Put the working one back so the user is never left with no way in.
+        let _ = crate::register_capture_shortcut(&app, &previous);
+        format!("Couldn't use {wanted}: {e}")
+    })?;
+
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    store.set(HOTKEY_KEY, serde_json::json!(wanted));
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))?;
+    Ok(wanted)
+}
+
+/// Whether the welcome panel has been dismissed before. Used to show the
+/// window on a genuine first run rather than leaving a new user staring at
+/// a tray icon they have no reason to click.
+#[tauri::command]
+pub fn get_seen_welcome<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    app.store(STORE_FILE)
+        .ok()
+        .and_then(|store| store.get(SEEN_WELCOME_KEY))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn set_seen_welcome<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    let store = app
+        .store(STORE_FILE)
+        .map_err(|e| format!("Could not open settings store: {e}"))?;
+    store.set(SEEN_WELCOME_KEY, serde_json::json!(true));
+    store
+        .save()
+        .map_err(|e| format!("Could not persist settings: {e}"))
 }

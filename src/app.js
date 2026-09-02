@@ -11,10 +11,9 @@
 
   const dom = {
     setupScreen: el("setup-screen"),
-    setupApiKey: el("setup-api-key"),
-    setupSave: el("setup-save"),
-    setupSkip: el("setup-skip"),
-    setupError: el("setup-error"),
+    setupStart: el("setup-start"),
+    setupSettings: el("setup-settings"),
+    setupHotkeyKeys: el("setup-hotkey-keys"),
 
     tabButtons: Array.from(document.querySelectorAll(".tab-btn")),
     tabPanels: Array.from(document.querySelectorAll(".tab-panel")),
@@ -89,6 +88,9 @@
     extractionMethodSelect: el("settings-extraction-method"),
     extractionMethodStatus: el("extraction-method-status"),
 
+    apiKeyGroup: el("api-key-group"),
+    apiKeyHeading: el("api-key-heading"),
+    apiKeyHelp: el("api-key-help"),
     apiKeyStatus: el("api-key-status"),
     settingsApiKey: el("settings-api-key"),
     settingsSaveKey: el("settings-save-key"),
@@ -98,6 +100,9 @@
     settingsChoosePath: el("settings-choose-path"),
     settingsPathMessage: el("settings-path-message"),
     settingsHotkey: el("settings-hotkey"),
+    settingsHotkeyRecord: el("settings-hotkey-record"),
+    settingsHotkeyReset: el("settings-hotkey-reset"),
+    settingsHotkeyMessage: el("settings-hotkey-message"),
     settingsVersion: el("settings-version"),
     settingsUpdateCheck: el("settings-update-check"),
     settingsCheckUpdate: el("settings-check-update"),
@@ -191,9 +196,7 @@
   // ---------- Keyboard hint labels ----------
 
   function applyPlatformHints() {
-    const mod = isMac ? "Cmd" : "Ctrl";
-    dom.pasteHintKey.textContent = mod;
-    dom.settingsHotkey.textContent = `${mod}+Shift+J`;
+    dom.pasteHintKey.textContent = isMac ? "Cmd" : "Ctrl";
   }
 
   // ---------- Tabs ----------
@@ -233,34 +236,38 @@
     dom.fStatus.value = "Applied";
   }
 
-  // ---------- First-run setup ----------
+  // ---------- First-run welcome ----------
 
+  /// Shown once, on the first launch, because the window opens itself then -
+  /// a tray-only app that starts invisible looks like it failed to launch,
+  /// and the shortcut is not guessable.
   async function checkFirstRunSetup() {
-    const hasKey = await invoke("has_api_key");
-    if (!hasKey && !setupDismissedThisSession) {
+    let seen = true;
+    try {
+      seen = await invoke("get_seen_welcome");
+    } catch (_) {
+      seen = true; // never trap someone behind a broken store read
+    }
+    if (!seen && !setupDismissedThisSession) {
       dom.setupScreen.hidden = false;
     }
   }
 
-  dom.setupSave.addEventListener("click", async () => {
-    const key = dom.setupApiKey.value.trim();
-    if (!key) {
-      showError(dom.setupError, "Enter an API key, or choose Skip.");
-      return;
-    }
-    try {
-      await invoke("save_api_key", { key });
-      hideError(dom.setupError);
-      dom.setupScreen.hidden = true;
-      refreshApiKeyStatus();
-    } catch (e) {
-      showError(dom.setupError, String(e));
-    }
-  });
-
-  dom.setupSkip.addEventListener("click", () => {
+  async function dismissWelcome() {
     setupDismissedThisSession = true;
     dom.setupScreen.hidden = true;
+    try {
+      await invoke("set_seen_welcome");
+    } catch (_) {
+      /* it will simply show again next launch */
+    }
+  }
+
+  dom.setupStart.addEventListener("click", dismissWelcome);
+
+  dom.setupSettings.addEventListener("click", async () => {
+    await dismissWelcome();
+    activateTab("settings");
   });
 
   // ---------- Capture: paste / drag-drop / file picker ----------
@@ -415,6 +422,7 @@
   // plugin, unless the user is typing into a text field (where normal
   // text paste should keep working).
   document.addEventListener("keydown", async (e) => {
+    if (recordingHotkey) return;
     const mod = isMac ? e.metaKey : e.ctrlKey;
     if (!mod || e.key.toLowerCase() !== "v") return;
 
@@ -1130,26 +1138,67 @@
 
   // ---------- Settings tab ----------
 
+  let providers = [];
+
+  function currentProvider() {
+    return (
+      providers.find((p) => p.id === currentExtractionMethod) ||
+      providers.find((p) => p.id === "tesseract") ||
+      { id: "tesseract", label: "Tesseract", needs_key: false, key_label: "", key_placeholder: "", key_help: "" }
+    );
+  }
+
   async function refreshExtractionMethodStatus() {
-    if (currentExtractionMethod === "tesseract") {
+    const provider = currentProvider();
+    if (provider.id === "tesseract") {
       const available = await invoke("local_ocr_available");
       dom.extractionMethodStatus.textContent = available
-        ? "Tesseract detected - screenshots are read locally, for free."
-        : "Tesseract not found. Install it with `brew install tesseract` (macOS), your package manager (Linux), or from github.com/tesseract-ocr/tesseract (Windows), or switch to Claude below.";
+        ? "Tesseract detected - screenshots are read on this machine, for free, and nothing is sent anywhere."
+        : "Tesseract not found. Install it with `brew install tesseract` (macOS), your package manager (Linux), or from github.com/UB-Mannheim/tesseract/wiki (Windows) - or pick one of the cloud methods below.";
     } else {
-      dom.extractionMethodStatus.textContent =
-        "Uses the Anthropic API for higher-accuracy extraction - see the API key section below.";
+      dom.extractionMethodStatus.textContent = `Sends the screenshot to ${provider.label} for higher-accuracy extraction. Needs an API key, below.`;
     }
   }
 
+  /// The key card belongs to whichever provider is selected: it disappears
+  /// entirely for an offline method, so an offline setup never sees a cloud
+  /// provider's name or key wording.
+  async function renderApiKeySection() {
+    const provider = currentProvider();
+    if (!provider.needs_key) {
+      dom.apiKeyGroup.hidden = true;
+      return;
+    }
+    dom.apiKeyGroup.hidden = false;
+    dom.apiKeyHeading.textContent = provider.key_label;
+    dom.apiKeyHelp.textContent = provider.key_help;
+    dom.settingsApiKey.placeholder = provider.key_placeholder;
+    dom.settingsApiKey.value = "";
+    dom.settingsKeyMessage.hidden = true;
+    await refreshApiKeyStatus();
+  }
+
   async function loadExtractionMethod() {
+    try {
+      providers = await invoke("get_extraction_providers");
+    } catch (_) {
+      providers = [];
+    }
     try {
       currentExtractionMethod = await invoke("get_extraction_method");
     } catch (_) {
       currentExtractionMethod = "tesseract";
     }
-    dom.extractionMethodSelect.value = currentExtractionMethod;
+
+    dom.extractionMethodSelect.innerHTML = providers
+      .map(
+        (p) =>
+          `<option value="${escapeHtml(p.id)}"${p.id === currentExtractionMethod ? " selected" : ""}>${escapeHtml(p.label)}</option>`
+      )
+      .join("");
+
     await refreshExtractionMethodStatus();
+    await renderApiKeySection();
   }
 
   dom.extractionMethodSelect.addEventListener("change", async () => {
@@ -1157,23 +1206,28 @@
     try {
       await invoke("set_extraction_method", { method: currentExtractionMethod });
     } catch (_) {
-      /* best effort - the in-memory value still takes effect this session */
+      /* best effort - the in-memory value still applies this session */
     }
     await refreshExtractionMethodStatus();
+    await renderApiKeySection();
   });
 
   async function refreshApiKeyStatus() {
-    const hasKey = await invoke("has_api_key");
+    const provider = currentProvider();
+    if (!provider.needs_key) return;
+    const hasKey = await invoke("has_api_key", { provider: provider.id });
+    // Uses the label verbatim rather than lower-casing it, which produced
+    // "A openai api key is stored".
     dom.apiKeyStatus.textContent = hasKey
-      ? "An API key is stored in your OS keychain."
-      : "No API key stored - screenshot extraction is disabled until you add one.";
+      ? `Your ${provider.key_label} is stored in the OS keychain.`
+      : `No key stored - ${provider.label} extraction won't run until you add one.`;
   }
 
   dom.settingsSaveKey.addEventListener("click", async () => {
     const key = dom.settingsApiKey.value.trim();
     if (!key) return;
     try {
-      await invoke("save_api_key", { key });
+      await invoke("save_api_key", { provider: currentProvider().id, key });
       dom.settingsApiKey.value = "";
       dom.settingsKeyMessage.hidden = false;
       dom.settingsKeyMessage.textContent = "Saved.";
@@ -1186,7 +1240,7 @@
 
   dom.settingsDeleteKey.addEventListener("click", async () => {
     try {
-      await invoke("delete_api_key");
+      await invoke("delete_api_key", { provider: currentProvider().id });
       dom.settingsKeyMessage.hidden = false;
       dom.settingsKeyMessage.textContent = "Removed.";
       refreshApiKeyStatus();
@@ -1533,9 +1587,122 @@ ${inUse} saved application${inUse === 1 ? "" : "s"} still use it. They keep it -
     dom.settingsAutoInstall.checked = autoInstallUpdates;
   }
 
+  // ---------- Hotkey ----------
+
+  let recordingHotkey = false;
+
+  /// Turns a keydown into a Tauri accelerator string ("Ctrl+Shift+J").
+  /// Returns null while only modifiers are held, so the user can press and
+  /// release Ctrl without it being taken as their choice.
+  function acceleratorFrom(e) {
+    const parts = [];
+    if (e.ctrlKey) parts.push("Ctrl");
+    if (e.metaKey) parts.push(isMac ? "Cmd" : "Super");
+    if (e.altKey) parts.push("Alt");
+    if (e.shiftKey) parts.push("Shift");
+
+    const key = e.key;
+    if (["Control", "Meta", "Alt", "Shift", "OS"].includes(key)) return null;
+    if (parts.length === 0) return null; // a bare letter would fire while typing
+
+    let name;
+    if (/^[a-z]$/i.test(key)) name = key.toUpperCase();
+    else if (/^[0-9]$/.test(key)) name = key;
+    else if (/^F\d{1,2}$/.test(key)) name = key;
+    else {
+      const named = {
+        " ": "Space", ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left",
+        ArrowRight: "Right", Enter: "Enter", Tab: "Tab", Backspace: "Backspace",
+        Escape: "Escape", Delete: "Delete", Insert: "Insert", Home: "Home",
+        End: "End", PageUp: "PageUp", PageDown: "PageDown",
+        ",": "Comma", ".": "Period", "/": "Slash",
+        ";": "Semicolon", "'": "Quote", "[": "BracketLeft", "]": "BracketRight",
+        "\\": "Backslash", "-": "Minus", "=": "Equal", "`": "Backquote",
+      };
+      name = named[key];
+      if (!name) return null;
+    }
+    parts.push(name);
+    return parts.join("+");
+  }
+
+  function stopRecording() {
+    recordingHotkey = false;
+    dom.settingsHotkeyRecord.textContent = "Change…";
+    dom.settingsHotkey.classList.remove("recording");
+  }
+
+  dom.settingsHotkeyRecord.addEventListener("click", () => {
+    if (recordingHotkey) {
+      stopRecording();
+      loadHotkey();
+      return;
+    }
+    recordingHotkey = true;
+    dom.settingsHotkeyRecord.textContent = "Cancel";
+    dom.settingsHotkey.classList.add("recording");
+    dom.settingsHotkey.value = "Press a combination…";
+    dom.settingsHotkeyMessage.textContent = "Listening - press the keys you want, or Cancel.";
+    dom.settingsHotkey.focus();
+  });
+
+  dom.settingsHotkeyReset.addEventListener("click", async () => {
+    stopRecording();
+    await applyHotkey(null);
+  });
+
+  async function applyHotkey(shortcut) {
+    try {
+      const inForce = await invoke("set_hotkey", {
+        shortcut: shortcut || (isMac ? "Cmd+Shift+J" : "Ctrl+Shift+J"),
+      });
+      dom.settingsHotkey.value = inForce;
+      dom.setupHotkeyKeys.textContent = inForce;
+      dom.settingsHotkeyMessage.textContent = `${inForce} now opens Job Tracker from anywhere.`;
+    } catch (e) {
+      // Rust put the previous shortcut back, so there is always a way in -
+      // reload it so the field shows what is actually in force rather than
+      // the "press a combination" placeholder.
+      await loadHotkey();
+      dom.settingsHotkeyMessage.textContent = `${e} Keeping ${dom.settingsHotkey.value}.`;
+    }
+  }
+
+  async function loadHotkey() {
+    try {
+      const current = await invoke("get_hotkey");
+      dom.settingsHotkey.value = current;
+      dom.setupHotkeyKeys.textContent = current;
+    } catch (_) {
+      dom.settingsHotkey.value = isMac ? "Cmd+Shift+J" : "Ctrl+Shift+J";
+    }
+  }
+
   // ---------- Global hotkey / Esc ----------
 
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (!recordingHotkey) return;
+      // While recording, every combination belongs to the recorder - including
+      // Escape, which would otherwise hide the window mid-edit.
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        stopRecording();
+        loadHotkey();
+        return;
+      }
+      const accelerator = acceleratorFrom(e);
+      if (!accelerator) return;
+      stopRecording();
+      applyHotkey(accelerator);
+    },
+    true
+  );
+
   document.addEventListener("keydown", (e) => {
+    if (recordingHotkey) return;
     if (e.key === "Escape") {
       getCurrentWindow().hide();
     }
@@ -1556,8 +1723,8 @@ ${inUse} saved application${inUse === 1 ? "" : "s"} still use it. They keep it -
     resetCaptureArea();
     await populateStatusDropdown();
     await loadExtractionMethod();
+    await loadHotkey();
     await checkFirstRunSetup();
-    await refreshApiKeyStatus();
     await refreshExcelPath();
     await loadApplications();
     await loadUpdateSettings();

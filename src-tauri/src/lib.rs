@@ -11,10 +11,40 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager, WindowEvent,
 };
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 const CAPTURE_SHORTCUT_MAC: &str = "Cmd+Shift+J";
 const CAPTURE_SHORTCUT_OTHER: &str = "Ctrl+Shift+J";
+
+pub fn default_hotkey() -> &'static str {
+    if cfg!(target_os = "macos") {
+        CAPTURE_SHORTCUT_MAC
+    } else {
+        CAPTURE_SHORTCUT_OTHER
+    }
+}
+
+/// Points the capture shortcut at `accelerator`, releasing whatever was
+/// registered before. Parsing and registration are both fallible - the
+/// string comes from a text field, and another app may already own the
+/// combination - so the caller decides what to do on failure.
+pub fn register_capture_shortcut<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    accelerator: &str,
+) -> Result<(), String> {
+    use std::str::FromStr;
+
+    let shortcut = Shortcut::from_str(accelerator)
+        .map_err(|_| format!("'{accelerator}' isn't a shortcut this can register."))?;
+
+    // Dropping every previous registration keeps repeated edits from
+    // leaving stale shortcuts behind.
+    let _ = app.global_shortcut().unregister_all();
+
+    app.global_shortcut()
+        .register(shortcut)
+        .map_err(|e| format!("{e}"))
+}
 
 fn show_and_focus_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -41,22 +71,26 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            let shortcut_str = if cfg!(target_os = "macos") {
-                CAPTURE_SHORTCUT_MAC
-            } else {
-                CAPTURE_SHORTCUT_OTHER
-            };
-            let shortcut: Shortcut = if cfg!(target_os = "macos") {
-                Shortcut::new(
-                    Some(Modifiers::SUPER | Modifiers::SHIFT),
-                    Code::KeyJ,
-                )
-            } else {
-                Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyJ)
-            };
-            app.global_shortcut()
-                .register(shortcut)
-                .unwrap_or_else(|e| eprintln!("Could not register {shortcut_str}: {e}"));
+            let handle = app.handle().clone();
+
+            // The user's shortcut if they set one, else the platform default.
+            // A stored shortcut that no longer registers (another app took it
+            // since) falls back rather than leaving no way to open the window.
+            let wanted = commands::get_hotkey(handle.clone());
+            if let Err(e) = register_capture_shortcut(&handle, &wanted) {
+                eprintln!("Could not register {wanted}: {e}");
+                let fallback = default_hotkey();
+                if let Err(e) = register_capture_shortcut(&handle, fallback) {
+                    eprintln!("Could not register {fallback} either: {e}");
+                }
+            }
+
+            // A tray-only app that starts invisible looks like it failed to
+            // launch. Show the window the first time, so the shortcut can be
+            // explained instead of guessed.
+            if !commands::get_seen_welcome(handle.clone()) {
+                show_and_focus_main_window(&handle);
+            }
 
             let show_item = MenuItem::with_id(app, "show", "Open Job Tracker", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -96,6 +130,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_statuses,
             commands::has_api_key,
+            commands::get_extraction_providers,
+            commands::get_hotkey,
+            commands::set_hotkey,
+            commands::get_seen_welcome,
+            commands::set_seen_welcome,
             commands::save_api_key,
             commands::delete_api_key,
             commands::extract_from_image,

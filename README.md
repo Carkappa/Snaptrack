@@ -80,9 +80,12 @@ Switch between these anytime in Settings — no restart needed:
 
   If Tesseract isn't found, Settings tells you so and you can switch to
   Claude, or just use manual entry.
-- **Claude API (opt-in, most accurate, needs a key).** Sends the
-  screenshot to Claude, which actually reads the page the way you would
-  and returns structured JSON. Needs an Anthropic API key (see below).
+- **A cloud model (opt-in, most accurate, needs a key).** Sends the
+  screenshot to Claude, ChatGPT or Gemini, which actually read the page
+  the way you would and return structured JSON. Pick one in Settings and
+  the key field for that provider appears; each provider's key is stored
+  separately in the OS keychain, so switching between them doesn't lose
+  the others. Choose Tesseract and no key wording is shown at all.
 
 Either way, nothing is ever invented — a field that isn't visible (or
 that the extractor isn't confident about) comes back empty for you to

@@ -9,24 +9,25 @@
 <body>
   <div id="setup-screen" class="setup-screen" hidden>
     <div class="setup-card">
-      <h1>Welcome to Job Tracker</h1>
+      <h1>Job Tracker</h1>
       <p>
-        Paste a screenshot of a job posting and it'll pull out the company,
-        role, and details for you. By default this uses Tesseract, running
-        entirely on your machine, free - if it's installed. Add an Anthropic
-        API key below for meaningfully more accurate extraction with Claude.
+        Screenshot a job posting, press the shortcut, paste. The company,
+        role, location and the rest get pulled out for you to check, and the
+        row is saved into an Excel workbook you own.
       </p>
-      <label for="setup-api-key">Anthropic API key (optional)</label>
-      <input id="setup-api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
-      <div id="setup-error" class="error-text" hidden></div>
-      <div class="setup-actions">
-        <button id="setup-save" class="btn btn-primary">Save key</button>
-        <button id="setup-skip" class="btn btn-link">Skip - I'll enter jobs by hand</button>
+      <div class="setup-hotkey">
+        <span>Open it from anywhere with</span>
+        <kbd id="setup-hotkey-keys">Ctrl+Shift+J</kbd>
       </div>
       <p class="hint">
-        Stored in your OS keychain. Never written to a file or environment
-        variable. Switch between Claude and Tesseract anytime in Settings.
+        Job Tracker lives in your system tray, not the taskbar &mdash; closing
+        this window hides it, it doesn't quit. You can change the shortcut,
+        and pick how screenshots are read, in Settings.
       </p>
+      <div class="setup-actions">
+        <button id="setup-start" class="btn btn-primary">Get started</button>
+        <button id="setup-settings" class="btn btn-link">Open Settings</button>
+      </div>
     </div>
   </div>
 
@@ -279,18 +280,18 @@
         <div class="settings-group">
           <h2>Screenshot extraction method</h2>
           <label for="settings-extraction-method">Method</label>
-          <select id="settings-extraction-method">
-            <option value="tesseract">Tesseract (free, offline)</option>
-            <option value="claude">Claude API (most accurate, needs a key)</option>
-          </select>
+          <select id="settings-extraction-method"></select>
           <p id="extraction-method-status" class="hint"></p>
         </div>
 
-        <div class="settings-group">
-          <h2>Anthropic API key</h2>
+        <!-- Only rendered for a method that actually needs a key, so an
+             offline setup never sees a cloud provider's wording. -->
+        <div class="settings-group" id="api-key-group" hidden>
+          <h2 id="api-key-heading">API key</h2>
           <p id="api-key-status" class="hint">Checking&hellip;</p>
           <label for="settings-api-key">New API key</label>
-          <input id="settings-api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
+          <input id="settings-api-key" type="password" placeholder="sk-..." autocomplete="off" />
+          <p id="api-key-help" class="hint"></p>
           <div class="settings-actions">
             <button id="settings-save-key" class="btn btn-secondary">Save key</button>
             <button id="settings-delete-key" class="btn btn-link">Remove stored key</button>
@@ -359,7 +360,16 @@
 
         <div class="settings-group">
           <h2>Global hotkey</h2>
-          <p class="hint"><kbd id="settings-hotkey">Cmd+Shift+J</kbd> shows this window from anywhere.</p>
+          <p class="hint">The shortcut that shows this window from anywhere.</p>
+          <div class="path-row">
+            <input id="settings-hotkey" type="text" readonly placeholder="Click, then press a combination" />
+            <button id="settings-hotkey-record" class="btn btn-secondary">Change&hellip;</button>
+            <button id="settings-hotkey-reset" class="btn btn-link">Reset</button>
+          </div>
+          <p id="settings-hotkey-message" class="hint">
+            Click Change, then press the keys you want. Needs at least one of
+            Ctrl, Alt, Shift or Cmd.
+          </p>
         </div>
       </section>
     </main>

@@ -344,6 +344,23 @@ main {
   color: var(--muted);
 }
 
+.setup-hotkey {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  margin: 2px 0;
+  background: var(--bg-sunken);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.setup-hotkey kbd {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
 .setup-actions {
   display: flex;
   align-items: center;
@@ -1420,6 +1437,14 @@ button.detail-row.active {
 
 .checkbox-row span {
   cursor: pointer;
+}
+
+/* The hotkey field while it is listening for a combination. */
+#settings-hotkey.recording {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  color: var(--muted);
+  font-style: italic;
 }
 
 /* ---------- Status editor ---------- */
