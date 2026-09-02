@@ -1570,6 +1570,30 @@ pub struct ChainResult {
     pub fell_back_from: Vec<String>,
 }
 
+/// Trims an error to the part that says what went wrong.
+///
+/// Several of these carry a paragraph of installation advice, which is
+/// useful on its own and unreadable stacked three deep.
+fn first_sentence(message: &str) -> String {
+    let trimmed = message.trim();
+    let cut = trimmed
+        .find(". ")
+        .map(|i| i + 1)
+        .unwrap_or(trimmed.len())
+        .min(160);
+    let short: String = trimmed.chars().take(cut).collect();
+    if short.len() < trimmed.len() {
+        format!("{}...", short.trim_end_matches('.').trim())
+    } else {
+        short
+    }
+}
+
+#[cfg(test)]
+pub fn first_sentence_for_test(message: &str) -> String {
+    first_sentence(message)
+}
+
 /// Runs one method, whichever kind it is.
 async fn run_one<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -1615,7 +1639,7 @@ pub async fn extract_with_chain<R: tauri::Runtime>(
     chain.extend(read_fallback_chain(&app));
 
     let mut failed = Vec::new();
-    let mut last_error = String::new();
+    let mut errors: Vec<String> = Vec::new();
 
     for provider in &chain {
         match run_one(&app, provider, &image_base64, &media_type).await {
@@ -1627,18 +1651,17 @@ pub async fn extract_with_chain<R: tauri::Runtime>(
                 })
             }
             Err(e) => {
-                last_error = format!("{provider}: {e}");
+                let label = crate::models::find_provider(provider)
+                    .map(|p| p.label)
+                    .unwrap_or_else(|| provider.clone());
+                errors.push(format!("{label}: {}", first_sentence(&e)));
                 failed.push(provider.clone());
             }
         }
     }
 
-    Err(if failed.len() > 1 {
-        format!(
-            "Every method failed. The last was {last_error}. Tried: {}.",
-            failed.join(", ")
-        )
-    } else {
-        last_error
-    })
+    // Every method's own reason, not just the last one's. The last is
+    // usually the least interesting - it is whatever was at the bottom of
+    // the list, while the failure worth reading is the first choice's.
+    Err(errors.join("\n"))
 }

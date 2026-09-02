@@ -103,18 +103,46 @@ fn claude_body(model: &str, image_base64: &str, media_type: &str) -> serde_json:
     })
 }
 
-fn openai_body(model: &str, image_base64: &str, media_type: &str) -> serde_json::Value {
-    serde_json::json!({
-        "model": model,
-        "max_tokens": 1024,
-        "response_format": {
+/// OpenAI's reasoning models rejected `max_tokens` in favour of
+/// `max_completion_tokens`, and a gateway in front of them inherits that.
+fn uses_completion_tokens(model: &str) -> bool {
+    let m = model.to_lowercase();
+    // "protected.o3" and "protected.gpt-5" through a university gateway
+    // are the same models with a prefix.
+    ["o1", "o3", "o4", "gpt-5"]
+        .iter()
+        .any(|family| m.contains(family))
+}
+
+/// `strict` is false when the request is a retry.
+///
+/// A gateway that only forwards the common parts of the API rejects a
+/// strict json_schema outright, and the whole request fails rather than
+/// degrading. Asking for plain JSON still works everywhere, and the prompt
+/// asks for the same shape, so a retry loses the guarantee and nothing else.
+fn openai_body(
+    model: &str,
+    image_base64: &str,
+    media_type: &str,
+    strict_schema: bool,
+) -> serde_json::Value {
+    let token_limit = if uses_completion_tokens(model) {
+        serde_json::json!({ "max_completion_tokens": 1024 })
+    } else {
+        serde_json::json!({ "max_tokens": 1024 })
+    };
+    let format = if strict_schema {
+        serde_json::json!({
             "type": "json_schema",
-            "json_schema": {
-                "name": TOOL_NAME,
-                "strict": true,
-                "schema": field_schema()
-            }
-        },
+            "json_schema": { "name": TOOL_NAME, "strict": true, "schema": field_schema() }
+        })
+    } else {
+        serde_json::json!({ "type": "json_object" })
+    };
+
+    let mut body = serde_json::json!({
+        "model": model,
+        "response_format": format,
         "messages": [
             { "role": "system", "content": SYSTEM_PROMPT },
             { "role": "user", "content": [
@@ -123,7 +151,11 @@ fn openai_body(model: &str, image_base64: &str, media_type: &str) -> serde_json:
                     "url": format!("data:{media_type};base64,{image_base64}") } }
             ]}
         ]
-    })
+    });
+    if let (Some(obj), Some(limit)) = (body.as_object_mut(), token_limit.as_object()) {
+        obj.extend(limit.clone());
+    }
+    body
 }
 
 /// `model` is unused here on purpose: Gemini names the model in the URL
@@ -396,6 +428,73 @@ fn provider_display_name(provider: &str) -> &str {
     }
 }
 
+/// Talks to anything speaking OpenAI's wire format, retrying without the
+/// strict schema if the far end will not take one.
+///
+/// A university or company gateway typically forwards the common parts of
+/// the API and rejects the rest, so a strict `json_schema` fails the whole
+/// request. Plain JSON mode is accepted everywhere, and the prompt already
+/// asks for the same shape - the retry gives up the guarantee, not the
+/// result.
+#[allow(clippy::too_many_arguments)]
+async fn openai_compatible(
+    client: &reqwest::Client,
+    api_base: &str,
+    api_key: &str,
+    model: &str,
+    image_base64: &str,
+    media_type: &str,
+    name: &str,
+) -> Result<ExtractionResult, String> {
+    let url = format!("{}/chat/completions", api_base.trim_end_matches('/'));
+
+    for strict in [true, false] {
+        let response = client
+            .post(&url)
+            .header("authorization", format!("Bearer {api_key}"))
+            .header("content-type", "application/json")
+            .json(&openai_body(model, image_base64, media_type, strict))
+            .send()
+            .await
+            .map_err(|e| format!("Failed to reach the {name} API: {e}"))?;
+
+        let status = response.status();
+        let body_text = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read the {name} API response: {e}"))?;
+
+        if status.is_success() {
+            let body: serde_json::Value = serde_json::from_str(&body_text)
+                .map_err(|e| format!("Unexpected {name} API response shape: {e}"))?;
+            let raw_text = text_from_response("openai", &body)
+                .ok_or_else(|| format!("{name} returned no text content."))?;
+            let cleaned = strip_code_fences(&raw_text);
+            return match serde_json::from_str::<ExtractedFields>(&cleaned) {
+                Ok(fields) => Ok(ExtractionResult::Parsed { fields }),
+                Err(err) => Ok(ExtractionResult::ParseFailed {
+                    raw_text,
+                    error: err.to_string(),
+                }),
+            };
+        }
+
+        let message = error_message(&body_text);
+        // Only a rejected request is worth retrying plainer. A bad key or a
+        // rate limit will say the same thing twice.
+        let worth_retrying = strict
+            && status.as_u16() == 400
+            && ["response_format", "json_schema", "schema", "unsupported", "unrecognized"]
+                .iter()
+                .any(|hint| message.to_lowercase().contains(hint));
+        if !worth_retrying {
+            return Err(format!("{name} API error ({status}): {message}"));
+        }
+    }
+
+    unreachable!("the loop returns on both passes")
+}
+
 /// Sends the screenshot to the chosen provider and parses the JSON it
 /// returns. `media_type` must be one every provider accepts: image/png,
 /// image/jpeg, image/webp or image/gif.
@@ -417,11 +516,14 @@ pub async fn extract_fields_from_image(
             .header("anthropic-version", ANTHROPIC_VERSION)
             .json(&claude_body(model, image_base64, media_type)),
         // Texas A&M's AI Chat speaks OpenAI's wire format at its own
-        // address, so the two share everything but the URL.
-        "openai" | "tamu" => client
-            .post(format!("{}/chat/completions", api_base.trim_end_matches('/')))
-            .header("authorization", format!("Bearer {api_key}"))
-            .json(&openai_body(model, image_base64, media_type)),
+        // address, so the two share everything but the URL. Handled
+        // separately below because it may need a second, plainer attempt.
+        "openai" | "tamu" => {
+            return openai_compatible(
+                &client, api_base, api_key, model, image_base64, media_type, name,
+            )
+            .await
+        }
         "gemini" => client
             // The key goes in a header, not the query string, so it cannot
             // end up in a proxy log or a redirect.
@@ -526,7 +628,7 @@ mod tests {
 
     #[test]
     fn openai_sends_the_image_as_a_data_url() {
-        let b = openai_body("test-model", "BASE64DATA", "image/jpeg");
+        let b = openai_body("test-model", "BASE64DATA", "image/jpeg", true);
         assert_eq!(b["model"], "test-model");
         assert_eq!(b["messages"][0]["role"], "system");
         assert_eq!(b["messages"][0]["content"], SYSTEM_PROMPT);
@@ -552,7 +654,7 @@ mod tests {
     fn every_provider_carries_the_same_system_prompt_and_image() {
         for body in [
             claude_body("m", "D", "image/png"),
-            openai_body("m", "D", "image/png"),
+            openai_body("m", "D", "image/png", true),
             gemini_body("m", "D", "image/png"),
         ] {
             let text = body.to_string();
@@ -700,7 +802,7 @@ mod tests {
 
     #[test]
     fn openai_is_given_a_strict_json_schema() {
-        let b = openai_body("m", "D", "image/png");
+        let b = openai_body("m", "D", "image/png", true);
         assert_eq!(b["response_format"]["type"], "json_schema");
         assert_eq!(b["response_format"]["json_schema"]["strict"], true);
         assert!(b["response_format"]["json_schema"]["schema"]["properties"]["position"].is_object());
@@ -793,5 +895,47 @@ mod tests {
             b["messages"][0]["content"], SYSTEM_PROMPT,
             "and told not to invent anything"
         );
+    }
+
+    #[test]
+    fn reasoning_models_get_the_token_limit_they_accept() {
+        // o-series and GPT-5 rejected max_tokens; a gateway in front of
+        // them inherits that, prefix and all.
+        for model in ["protected.o3", "o3-mini", "protected.gpt-5", "gpt-5"] {
+            let b = openai_body(model, "D", "image/png", true);
+            assert!(b.get("max_completion_tokens").is_some(), "{model}");
+            assert!(b.get("max_tokens").is_none(), "{model}");
+        }
+        for model in ["gpt-4o", "protected.gpt-4o", "gpt-4.1"] {
+            let b = openai_body(model, "D", "image/png", true);
+            assert!(b.get("max_tokens").is_some(), "{model}");
+            assert!(b.get("max_completion_tokens").is_none(), "{model}");
+        }
+    }
+
+    #[test]
+    fn a_plainer_retry_asks_for_json_without_a_schema() {
+        let strict = openai_body("gpt-4o", "D", "image/png", true);
+        assert_eq!(strict["response_format"]["type"], "json_schema");
+        assert_eq!(strict["response_format"]["json_schema"]["strict"], true);
+
+        let plain = openai_body("gpt-4o", "D", "image/png", false);
+        assert_eq!(
+            plain["response_format"]["type"], "json_object",
+            "a gateway that refuses a schema still understands JSON mode"
+        );
+        assert!(plain["response_format"].get("json_schema").is_none());
+        // The image and the instructions are unchanged either way.
+        assert_eq!(plain["messages"][0]["content"], SYSTEM_PROMPT);
+        assert_eq!(plain["messages"][1]["content"][1]["type"], "image_url");
+    }
+
+    #[test]
+    fn only_the_first_sentence_of_a_long_error_is_kept() {
+        // Three stacked failures are unreadable if each brings a paragraph.
+        let long = "Tesseract isn't installed or isn't on your PATH. Install it with `brew install tesseract` (macOS), your package manager (Linux), or from https://github.com/tesseract-ocr/tesseract (Windows), then try again.";
+        let short = crate::commands::first_sentence_for_test(long);
+        assert!(short.len() < 90, "got {} chars: {short}", short.len());
+        assert!(short.starts_with("Tesseract isn't installed"));
     }
 }

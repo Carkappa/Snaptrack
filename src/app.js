@@ -93,16 +93,13 @@
     extractionMethodSelect: el("settings-extraction-method"),
     extractionMethodStatus: el("extraction-method-status"),
 
-    apiKeyGroup: el("api-key-group"),
-    apiKeyHeading: el("api-key-heading"),
-    apiKeyHelp: el("api-key-help"),
     fallbackList: el("fallback-list"),
     fallbackAdd: el("fallback-add"),
     fallbackAddBtn: el("fallback-add-btn"),
-    modelGroup: el("model-group"),
     ollamaGroup: el("ollama-group"),
     ollamaStatus: el("ollama-status"),
     ollamaModelRow: el("ollama-model-row"),
+    providerCards: el("provider-cards"),
     settingsOllamaModel: el("settings-ollama-model"),
     ollamaPullRow: el("ollama-pull-row"),
     ollamaPull: el("ollama-pull"),
@@ -114,15 +111,6 @@
     settingsOllamaHost: el("settings-ollama-host"),
     settingsOllamaSave: el("settings-ollama-save"),
     settingsOllamaReset: el("settings-ollama-reset"),
-    settingsModel: el("settings-model"),
-    settingsModelSave: el("settings-model-save"),
-    settingsModelReset: el("settings-model-reset"),
-    settingsModelMessage: el("settings-model-message"),
-    apiKeyStatus: el("api-key-status"),
-    settingsApiKey: el("settings-api-key"),
-    settingsSaveKey: el("settings-save-key"),
-    settingsDeleteKey: el("settings-delete-key"),
-    settingsKeyMessage: el("settings-key-message"),
     settingsExcelPath: el("settings-excel-path"),
     settingsChoosePath: el("settings-choose-path"),
     settingsPathMessage: el("settings-path-message"),
@@ -413,7 +401,9 @@
     currentImage = { base64, mediaType };
     dom.thumbnailWrap.hidden = false;
     dom.thumbnail.src = `data:${mediaType};base64,${base64}`;
-    dom.thumbnailStatus.textContent = "Extracting details…";
+    dom.thumbnailStatus.textContent = "Extracting details\u2026";
+    dom.thumbnailStatus.classList.remove("multiline");
+    dom.thumbnailStatus.classList.remove("multiline");
     dom.parseFailed.hidden = true;
     dom.form.hidden = true;
 
@@ -438,7 +428,11 @@
       }
       dom.form.hidden = false;
     } catch (e) {
-      dom.thumbnailStatus.textContent = `Couldn't extract details: ${e}`;
+      // Rust returns one line per method that failed, each with its own
+      // reason - stacked on one line they are unreadable.
+      dom.thumbnailStatus.textContent = `Couldn't extract details.
+${e}`;
+      dom.thumbnailStatus.classList.add("multiline");
       applyExtractedFields({});
       dom.form.hidden = false;
     }
@@ -1349,25 +1343,6 @@
     }
   }
 
-  /// The key card belongs to whichever provider is selected: it disappears
-  /// entirely for an offline method, so an offline setup never sees a cloud
-  /// provider's name or key wording.
-  async function renderApiKeySection() {
-    const provider = currentProvider();
-    if (!provider.needs_key) {
-      dom.apiKeyGroup.hidden = true;
-      return;
-    }
-    dom.apiKeyGroup.hidden = false;
-    dom.apiKeyHeading.textContent = provider.key_label;
-    dom.apiKeyHelp.textContent = provider.key_help;
-    dom.settingsApiKey.placeholder = provider.key_placeholder;
-    dom.settingsApiKey.value = "";
-    dom.settingsKeyMessage.hidden = true;
-    await refreshApiKeyStatus();
-  }
-
-  /// Shown for anything that runs a model, key or no key.
   let fallbackChain = [];
 
   async function renderFallbacks() {
@@ -1412,6 +1387,8 @@
       /* keep what is on screen; the next render re-reads it */
     }
     await renderFallbacks();
+    // A fallback that needs a key needs somewhere to put it.
+    await renderProviderCards();
   }
 
   dom.fallbackAddBtn.addEventListener("click", () => {
@@ -1434,14 +1411,137 @@
     saveFallbacks(next);
   });
 
-  async function renderModelSection() {
-    const provider = currentProvider();
-    // Ollama gets a picker of what is actually pulled instead, in its own
-    // card - a free-text model name there is a way to typo yourself into
-    // "model not found".
-    dom.modelGroup.hidden = !provider.default_model || provider.id === "ollama";
-    if (!dom.modelGroup.hidden) await loadModel();
+  /// A card per method actually in use - the chosen one, then each
+  /// fallback. Rendered rather than a single fixed card because a fallback
+  /// needs its key too, and there was previously no way to enter one
+  /// without temporarily making it the primary.
+  ///
+  /// An offline setup renders nothing here, so it never sees a cloud
+  /// provider's name or key wording.
+  async function renderProviderCards() {
+    const inUse = [currentExtractionMethod, ...fallbackChain]
+      .map((id) => providers.find((p) => p.id === id))
+      .filter((p) => p && (p.needs_key || (p.default_model && p.id !== "ollama")));
+
+    if (inUse.length === 0) {
+      dom.providerCards.innerHTML = "";
+      return;
+    }
+
+    const cards = await Promise.all(
+      inUse.map(async (p, i) => {
+        const stored = p.needs_key ? await invoke("has_api_key", { provider: p.id }) : false;
+        let model = p.default_model;
+        if (p.default_model) {
+          try {
+            model = await invoke("get_model", { provider: p.id });
+          } catch (_) {
+            /* fall back to the shipped default */
+          }
+        }
+        const role = i === 0 ? "your chosen method" : `fallback ${i}`;
+        return `<div class="settings-group provider-card" data-provider="${escapeHtml(p.id)}">
+          <h2>${escapeHtml(p.needs_key ? p.key_label : p.label)}</h2>
+          <p class="hint">For ${escapeHtml(p.label)} - ${escapeHtml(role)}.</p>
+          ${p.needs_key ? keyBlock(p, stored) : ""}
+          ${p.default_model ? modelBlock(p, model) : ""}
+          <p class="card-message hint" hidden></p>
+        </div>`;
+      })
+    );
+    dom.providerCards.innerHTML = cards.join("");
   }
+
+  /// Two states: a key is stored, or it is not. When one is stored the
+  /// field is put away - leaving an empty password box next to "a key is
+  /// stored" reads as though it did not save.
+  function keyBlock(p, stored) {
+    if (stored) {
+      return `<div class="key-stored">
+        <span class="key-badge">Added</span>
+        <span class="hint">Held in your OS keychain, never written to a file.</span>
+        <button type="button" class="btn btn-link btn-small" data-act="replace">Replace</button>
+        <button type="button" class="btn btn-link btn-small" data-act="remove">Remove</button>
+      </div>
+      <div class="key-entry" hidden>
+        <input type="password" class="key-input" placeholder="${escapeHtml(p.key_placeholder)}" autocomplete="off" />
+        <div class="settings-actions">
+          <button type="button" class="btn btn-secondary btn-small" data-act="save">Save</button>
+          <button type="button" class="btn btn-link btn-small" data-act="cancel">Cancel</button>
+        </div>
+      </div>`;
+    }
+    return `<div class="key-entry">
+      <input type="password" class="key-input" placeholder="${escapeHtml(p.key_placeholder)}" autocomplete="off" />
+      <p class="hint">${escapeHtml(p.key_help)}</p>
+      <div class="settings-actions">
+        <button type="button" class="btn btn-secondary btn-small" data-act="save">Save key</button>
+      </div>
+    </div>`;
+  }
+
+  function modelBlock(p, model) {
+    return `<label class="settings-sublabel">Model</label>
+      <div class="path-row">
+        <input type="text" class="model-input" value="${escapeHtml(model)}" placeholder="${escapeHtml(p.default_model)}" autocomplete="off" spellcheck="false" />
+        <button type="button" class="btn btn-secondary btn-small" data-act="save-model">Save</button>
+        <button type="button" class="btn btn-link btn-small" data-act="reset-model">Default</button>
+      </div>`;
+  }
+
+  function cardMessage(card, text) {
+    const node = card.querySelector(".card-message");
+    node.hidden = false;
+    node.textContent = text;
+  }
+
+  dom.providerCards.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const card = btn.closest(".provider-card");
+    const id = card.dataset.provider;
+    const act = btn.dataset.act;
+
+    if (act === "replace" || act === "cancel") {
+      card.querySelector(".key-stored").hidden = act === "replace";
+      card.querySelector(".key-entry").hidden = act === "cancel";
+      return;
+    }
+    if (act === "save") {
+      const key = card.querySelector(".key-input").value.trim();
+      if (!key) return cardMessage(card, "Paste a key first.");
+      try {
+        await invoke("save_api_key", { provider: id, key });
+        await renderProviderCards();
+      } catch (err) {
+        cardMessage(card, String(err));
+      }
+      return;
+    }
+    if (act === "remove") {
+      try {
+        await invoke("delete_api_key", { provider: id });
+        await renderProviderCards();
+      } catch (err) {
+        cardMessage(card, String(err));
+      }
+      return;
+    }
+    if (act === "save-model" || act === "reset-model") {
+      const input = card.querySelector(".model-input");
+      const value = act === "reset-model" ? "" : input.value;
+      try {
+        const inForce = await invoke("set_model", { provider: id, model: value });
+        input.value = inForce;
+        cardMessage(
+          card,
+          value.trim() === "" ? `Back to the default, ${inForce}.` : `Using ${inForce}.`
+        );
+      } catch (err) {
+        cardMessage(card, String(err));
+      }
+    }
+  });
 
   async function renderOllamaSection() {
     const provider = currentProvider();
@@ -1600,34 +1700,6 @@
     }
   });
 
-  async function loadModel() {
-    const provider = currentProvider();
-    if (!provider.default_model) return;
-    try {
-      dom.settingsModel.value = await invoke("get_model", { provider: provider.id });
-    } catch (_) {
-      dom.settingsModel.value = provider.default_model || "";
-    }
-    dom.settingsModel.placeholder = provider.default_model || "";
-  }
-
-  async function saveModel(value) {
-    const provider = currentProvider();
-    try {
-      const inForce = await invoke("set_model", { provider: provider.id, model: value });
-      dom.settingsModel.value = inForce;
-      dom.settingsModelMessage.textContent =
-        value.trim() === ""
-          ? `Back to the default, ${inForce}.`
-          : `${provider.label} will use ${inForce}.`;
-    } catch (e) {
-      dom.settingsModelMessage.textContent = String(e);
-      await loadModel();
-    }
-  }
-
-  dom.settingsModelSave.addEventListener("click", () => saveModel(dom.settingsModel.value));
-  dom.settingsModelReset.addEventListener("click", () => saveModel(""));
 
   async function loadExtractionMethod() {
     try {
@@ -1662,8 +1734,7 @@
       .join("");
 
     await refreshExtractionMethodStatus();
-    await renderApiKeySection();
-    await renderModelSection();
+    await renderProviderCards();
     await renderOllamaSection();
     await renderFallbacks();
   }
@@ -1676,51 +1747,13 @@
       /* best effort - the in-memory value still applies this session */
     }
     await refreshExtractionMethodStatus();
-    await renderApiKeySection();
-    await renderModelSection();
+    await renderProviderCards();
     await renderOllamaSection();
     // Changing the primary can invalidate the fallback list: the backend
     // drops the new primary from it, and the "add" options shift.
     await renderFallbacks();
   });
 
-  async function refreshApiKeyStatus() {
-    const provider = currentProvider();
-    if (!provider.needs_key) return;
-    const hasKey = await invoke("has_api_key", { provider: provider.id });
-    // Uses the label verbatim rather than lower-casing it, which produced
-    // "A openai api key is stored".
-    dom.apiKeyStatus.textContent = hasKey
-      ? `Your ${provider.key_label} is stored in the OS keychain.`
-      : `No key stored - ${provider.label} extraction won't run until you add one.`;
-  }
-
-  dom.settingsSaveKey.addEventListener("click", async () => {
-    const key = dom.settingsApiKey.value.trim();
-    if (!key) return;
-    try {
-      await invoke("save_api_key", { provider: currentProvider().id, key });
-      dom.settingsApiKey.value = "";
-      dom.settingsKeyMessage.hidden = false;
-      dom.settingsKeyMessage.textContent = "Saved.";
-      refreshApiKeyStatus();
-    } catch (e) {
-      dom.settingsKeyMessage.hidden = false;
-      dom.settingsKeyMessage.textContent = String(e);
-    }
-  });
-
-  dom.settingsDeleteKey.addEventListener("click", async () => {
-    try {
-      await invoke("delete_api_key", { provider: currentProvider().id });
-      dom.settingsKeyMessage.hidden = false;
-      dom.settingsKeyMessage.textContent = "Removed.";
-      refreshApiKeyStatus();
-    } catch (e) {
-      dom.settingsKeyMessage.hidden = false;
-      dom.settingsKeyMessage.textContent = String(e);
-    }
-  });
 
   async function refreshExcelPath() {
     try {

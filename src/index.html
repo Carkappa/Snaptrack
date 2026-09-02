@@ -311,34 +311,10 @@
           </div>
         </div>
 
-        <!-- Only rendered for a method that actually needs a key, so an
-             offline setup never sees a cloud provider's wording. -->
-        <div class="settings-group" id="api-key-group" hidden>
-          <h2 id="api-key-heading">API key</h2>
-          <p id="api-key-status" class="hint">Checking&hellip;</p>
-          <label for="settings-api-key">New API key</label>
-          <input id="settings-api-key" type="password" placeholder="sk-..." autocomplete="off" />
-          <p id="api-key-help" class="hint"></p>
-          <div class="settings-actions">
-            <button id="settings-save-key" class="btn btn-secondary">Save key</button>
-            <button id="settings-delete-key" class="btn btn-link">Remove stored key</button>
-          </div>
-          <div id="settings-key-message" class="hint" hidden></div>
-        </div>
-
-        <div class="settings-group" id="model-group" hidden>
-          <h2>Model</h2>
-          <div class="path-row">
-            <input id="settings-model" type="text" autocomplete="off" spellcheck="false" />
-            <button id="settings-model-save" class="btn btn-secondary">Save</button>
-            <button id="settings-model-reset" class="btn btn-link">Default</button>
-          </div>
-          <p id="settings-model-message" class="hint">
-            Change this if the model is retired or you want a different one,
-            so extraction keeps working without waiting for an update. Blank
-            goes back to the default.
-          </p>
-        </div>
+        <!-- One card per method actually in use - the chosen one and any
+             fallback. An offline setup renders none of them, so it never
+             sees a cloud provider's name or key wording. -->
+        <div id="provider-cards"></div>
 
         <div class="settings-group" id="ollama-group" hidden>
           <h2>Ollama</h2>
