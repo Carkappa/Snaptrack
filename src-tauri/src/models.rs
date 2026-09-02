@@ -217,6 +217,123 @@ pub fn is_vision_model(id: &str) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+/// Model families ranked for this task, best first.
+///
+/// Reading a screenshot wants strong vision and a quick answer, not the
+/// deepest reasoning: the page is right there, it just has to be
+/// understood. Sonnet-class models sit at the sweet spot, the big
+/// reasoning models are slow and dear for no gain, and the small ones are
+/// a reasonable last resort.
+const CLOUD_MODEL_RANK: [&str; 8] = [
+    "sonnet", "gpt-4o", "gpt-4.1", "gemini-3", "opus", "gemini-2.5", "haiku", "flash",
+];
+
+/// Models that cannot read a screenshot and return fields, whatever their
+/// name suggests.
+fn is_unusable_for_extraction(id: &str) -> bool {
+    let m = id.to_lowercase();
+    ["embed", "whisper", "tts", "dall-e", "imagen", "audio", "moderation", "rerank"]
+        .iter()
+        .any(|bad| m.contains(bad))
+}
+
+/// Picks the best model for this task out of what a key can actually
+/// reach.
+///
+/// The point is that nobody should have to know that a provider spells it
+/// "protected.Claude Sonnet 4.6" - capitals, spaces and version included.
+/// Returns None when nothing in the list is usable, so the caller can keep
+/// whatever was configured.
+pub fn best_cloud_model(available: &[String]) -> Option<String> {
+    let usable: Vec<&String> = available
+        .iter()
+        .filter(|m| !is_unusable_for_extraction(m))
+        .collect();
+    if usable.is_empty() {
+        return None;
+    }
+
+    for family in CLOUD_MODEL_RANK {
+        // Prefer the highest version within a family, which sorts last:
+        // "Claude Sonnet 4.6" beats "Claude Sonnet 4.1".
+        let mut matches: Vec<&&String> = usable
+            .iter()
+            .filter(|m| m.to_lowercase().contains(family))
+            .collect();
+        matches.sort();
+        if let Some(best) = matches.last() {
+            return Some((**best).clone());
+        }
+    }
+    Some(usable[0].clone())
+}
+
+#[cfg(test)]
+mod cloud_model_tests {
+    use super::*;
+
+    fn list(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn sonnet_class_wins_for_reading_a_screenshot() {
+        // The real list a Texas A&M key returned.
+        let got = best_cloud_model(&list(&[
+            "protected.o3",
+            "protected.Claude Opus 4.1",
+            "protected.Claude Opus 4.6",
+            "protected.Claude 3.5 Haiku",
+            "protected.Claude-Haiku-4.5",
+            "protected.Claude Sonnet 4.6",
+        ]));
+        assert_eq!(got.as_deref(), Some("protected.Claude Sonnet 4.6"));
+    }
+
+    #[test]
+    fn the_newest_of_a_family_is_taken() {
+        let got = best_cloud_model(&list(&[
+            "protected.Claude Sonnet 4.1",
+            "protected.Claude Sonnet 4.6",
+        ]));
+        assert_eq!(got.as_deref(), Some("protected.Claude Sonnet 4.6"));
+    }
+
+    #[test]
+    fn a_reasoning_model_is_not_chosen_over_a_vision_one() {
+        // o3 is stronger and slower, and the page is right there to read.
+        let got = best_cloud_model(&list(&["o3", "gpt-4o"]));
+        assert_eq!(got.as_deref(), Some("gpt-4o"));
+    }
+
+    #[test]
+    fn models_that_cannot_do_this_are_skipped() {
+        let got = best_cloud_model(&list(&[
+            "text-embedding-3-large",
+            "whisper-1",
+            "dall-e-3",
+            "gpt-4o",
+        ]));
+        assert_eq!(got.as_deref(), Some("gpt-4o"));
+        assert_eq!(
+            best_cloud_model(&list(&["text-embedding-3-large", "whisper-1"])),
+            None,
+            "nothing usable means keep whatever was configured"
+        );
+    }
+
+    #[test]
+    fn an_unranked_model_is_still_better_than_nothing() {
+        let got = best_cloud_model(&list(&["some-new-model-2027"]));
+        assert_eq!(got.as_deref(), Some("some-new-model-2027"));
+    }
+
+    #[test]
+    fn an_empty_list_chooses_nothing() {
+        assert_eq!(best_cloud_model(&[]), None);
+    }
+}
+
 /// Picks a usable model out of what Ollama has actually pulled.
 ///
 /// The point is that nothing has to be typed: a user who already has any

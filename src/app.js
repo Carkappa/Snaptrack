@@ -1439,16 +1439,33 @@ ${e}`;
             /* fall back to the shipped default */
           }
         }
-        // Only asked for when a key is stored; without one it returns
-        // nothing and the field stays free text.
-        const available = stored ? await invoke("list_provider_models", { provider: p.id }) : [];
+        // Only asked for when a key is stored. The shipped default was a
+        // guess made before anyone had a key, and a gateway serves an
+        // entirely different set - so if it isn't on offer, take the best
+        // that is rather than failing at capture time with a 404.
+        let available = [];
+        let autoPicked = false;
+        if (stored && p.default_model) {
+          try {
+            const choice = await invoke("auto_select_model", { provider: p.id });
+            available = choice.available;
+            autoPicked = choice.changed;
+            if (choice.changed) model = choice.model;
+          } catch (_) {
+            /* leave the configured model alone */
+          }
+        }
         const role = i === 0 ? "your chosen method" : `fallback ${i}`;
         return `<div class="settings-group provider-card" data-provider="${escapeHtml(p.id)}">
           <h2>${escapeHtml(p.needs_key ? p.key_label : p.label)}</h2>
           <p class="hint">For ${escapeHtml(p.label)} - ${escapeHtml(role)}.</p>
           ${p.needs_key ? keyBlock(p, stored) : ""}
           ${p.default_model ? modelBlock(p, model, available) : ""}
-          <p class="card-message hint" hidden></p>
+          <p class="card-message hint"${autoPicked ? "" : " hidden"}>${
+            autoPicked
+              ? `Your key doesn't offer the default, so ${escapeHtml(model)} was picked - the best of the ${available.length} it does offer.`
+              : ""
+          }</p>
         </div>`;
       })
     );

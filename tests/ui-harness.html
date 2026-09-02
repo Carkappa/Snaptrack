@@ -323,10 +323,30 @@
         state.ollamaUnload = enabled;
         return null;
       },
+      auto_select_model: ({ provider }) => {
+        const available = HANDLERS.list_provider_models({ provider });
+        const current = HANDLERS.get_model({ provider });
+        if (!available.length || available.includes(current)) {
+          return { model: current, changed: false, available };
+        }
+        // Mirrors best_cloud_model: sonnet-class first.
+        const best = available.find((m) => m.toLowerCase().includes("sonnet")) || available[0];
+        state.models[provider] = best;
+        return { model: best, changed: true, available };
+      },
       list_provider_models: ({ provider }) => {
         if (!state.apiKeys[provider]) return [];
+        // The real list a Texas A&M key returns - note it has no gpt-4o,
+        // which is what the shipped default used to be.
         return provider === "tamu"
-          ? ["protected.Claude Opus 4.6", "protected.Claude Sonnet 4.6", "protected.gpt-4o", "protected.o3"]
+          ? [
+              "protected.Claude 3.5 Haiku",
+              "protected.Claude Opus 4.1",
+              "protected.Claude Opus 4.6",
+              "protected.Claude Sonnet 4.6",
+              "protected.Claude-Haiku-4.5",
+              "protected.o3",
+            ]
           : ["gpt-4o", "gpt-4.1"];
       },
       test_api_key: ({ provider }) => {

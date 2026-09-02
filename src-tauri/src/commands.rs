@@ -615,6 +615,61 @@ pub async fn list_provider_models(provider: String) -> Vec<String> {
     names
 }
 
+/// Chooses a model for a provider when the configured one is not among
+/// those its key can reach.
+///
+/// The shipped default is a guess made before anyone had a key. A
+/// university gateway serves an entirely different set - "protected.Claude
+/// Sonnet 4.6" rather than "gpt-4o" - so the guess is usually wrong there
+/// and fails as a 404 at the moment of capture. Returns the model now in
+/// force, and whether it had to change.
+#[tauri::command]
+pub async fn auto_select_model<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    provider: String,
+) -> Result<ModelChoice, String> {
+    let current = resolve_model(&app, &provider);
+    let available = list_provider_models(provider.clone()).await;
+
+    // No listing endpoint, or no key yet: keep what is configured.
+    if available.is_empty() {
+        return Ok(ModelChoice {
+            model: current,
+            changed: false,
+            available: Vec::new(),
+        });
+    }
+    if available.iter().any(|m| m == &current) {
+        return Ok(ModelChoice {
+            model: current,
+            changed: false,
+            available,
+        });
+    }
+
+    let Some(best) = crate::models::best_cloud_model(&available) else {
+        return Ok(ModelChoice {
+            model: current,
+            changed: false,
+            available,
+        });
+    };
+    set_model(app, provider, best.clone())?;
+    Ok(ModelChoice {
+        model: best,
+        changed: true,
+        available,
+    })
+}
+
+#[derive(serde::Serialize)]
+pub struct ModelChoice {
+    pub model: String,
+    /// True when the configured model was not on offer and was replaced.
+    pub changed: bool,
+    pub available: Vec<String>,
+}
+
 /// Checks a stored key against the provider, without a screenshot.
 ///
 /// A failed capture cannot tell you whether the key is wrong, the model is
