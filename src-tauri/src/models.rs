@@ -465,6 +465,17 @@ mod model_choice_tests {
 pub fn extraction_providers() -> Vec<ExtractionProvider> {
     vec![
         ExtractionProvider::new(
+            "system",
+            "Built-in OCR - no install needed",
+            false,
+            "",
+            "",
+            "",
+            "",
+            ON_MACHINE,
+            "",
+        ),
+        ExtractionProvider::new(
             "tesseract",
             "Tesseract - text recognition only",
             false,
@@ -582,10 +593,16 @@ mod provider_tests {
                 assert!(!p.default_model.is_empty(), "{} needs a model", p.id);
             }
         }
-        assert!(
-            find_provider("tesseract").unwrap().default_model.is_empty(),
-            "Tesseract is an OCR engine, not a model - no model field for it"
-        );
+        for engine in ["tesseract", "system"] {
+            assert!(
+                find_provider(engine).unwrap().default_model.is_empty(),
+                "{engine} is an OCR engine, not a model - no model field for it"
+            );
+            assert!(
+                !find_provider(engine).unwrap().needs_key,
+                "{engine} runs locally and needs no key"
+            );
+        }
         assert!(
             !find_provider("ollama").unwrap().default_model.is_empty(),
             "Ollama needs a model even though it needs no key"
@@ -614,6 +631,7 @@ mod provider_tests {
             "on this machine, paid cloud, and the university account are three different decisions"
         );
         assert_eq!(find_provider("ollama").unwrap().group, ON_MACHINE);
+        assert_eq!(find_provider("system").unwrap().group, ON_MACHINE);
         assert_eq!(find_provider("claude").unwrap().group, CLOUD);
     }
 

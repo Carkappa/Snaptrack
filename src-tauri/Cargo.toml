@@ -38,6 +38,19 @@ csv = "1"
 regex = "1"
 url = "2"
 
+# Windows ships an OCR engine. It needs no install, produces no debris
+# from logos, and reads chips Tesseract misses - see DEVELOPING.md for the
+# measurements.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Media_Ocr",
+  "Globalization",
+  "Graphics_Imaging",
+  "Storage",
+  "Storage_Streams",
+  "Foundation_Collections",
+] }
+
 [dev-dependencies]
 tauri = { version = "2", features = ["tray-icon", "test"] }
 zip = "2"

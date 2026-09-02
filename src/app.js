@@ -1330,7 +1330,12 @@ ${e}`;
 
   async function refreshExtractionMethodStatus() {
     const provider = currentProvider();
-    if (provider.id === "tesseract") {
+    if (provider.id === "system") {
+      const available = await invoke("system_ocr_available");
+      dom.extractionMethodStatus.textContent = available
+        ? "Uses the OCR engine already built into this machine. Nothing to install, nothing leaves your computer."
+        : "This machine has no built-in OCR engine - it needs Windows 10 or later. Pick another method below.";
+    } else if (provider.id === "tesseract") {
       const available = await invoke("local_ocr_available");
       dom.extractionMethodStatus.textContent = available
         ? "Tesseract detected - screenshots are read on this machine, for free, and nothing is sent anywhere."

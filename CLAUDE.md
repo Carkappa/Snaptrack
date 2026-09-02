@@ -102,6 +102,22 @@ integration tests need a Windows runtime DLL that a bare toolchain does not
 provide - they fail with `STATUS_ENTRYPOINT_NOT_FOUND` locally and pass in
 CI, so let CI cover those rather than chasing it.
 
+## OCR engines
+
+Three, and they all return `Vec<OcrLine>` so the field heuristics,
+click-to-fill and correction-learning work the same behind any of them:
+
+- `system_ocr.rs` - the OS engine. Windows only so far; macOS has an
+  equivalent in Vision and Linux has none, so both fall back. `available()`
+  gates whether the method is offered at all.
+- `local_ocr.rs` - Tesseract, shelled out to, with the preprocessing and
+  page-segmentation work in the same file.
+- The cloud and Ollama vision paths, which return fields rather than
+  blocks.
+
+`tests/system_ocr.rs` runs against the real engine and skips where there
+isn't one, so it genuinely tests on Windows and honestly does nothing in CI.
+
 ## Things that will bite you
 
 - **The single-instance plugin must stay registered first.** Two copies mean

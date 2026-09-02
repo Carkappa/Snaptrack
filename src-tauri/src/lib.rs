@@ -3,6 +3,7 @@ mod excel;
 mod extraction;
 mod keychain;
 mod local_ocr;
+pub mod system_ocr;
 pub mod models;
 pub mod updates;
 
@@ -180,6 +181,8 @@ pub fn run() {
             commands::get_extraction_method,
             commands::set_extraction_method,
             commands::local_ocr_available,
+            commands::system_ocr_available,
+            commands::extract_with_system_ocr,
             commands::extract_with_local_ocr,
             commands::learn_ocr_hints,
             commands::extract_with_ollama,

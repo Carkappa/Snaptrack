@@ -83,6 +83,7 @@
       pathChange: { outcome: "Moved", screenshots: 2, backups: 3 },
       ollamaHost: "http://localhost:11434",
       ollamaUnload: true,
+      systemOcrAvailable: true,
       fallbackChain: [],
       // Provider ids listed here fail, to exercise the fallback path.
       chainFails: [],
@@ -159,7 +160,10 @@
         }
         return summary;
       },
+      system_ocr_available: () => state.systemOcrAvailable,
+      extract_with_system_ocr: () => HANDLERS.extract_with_local_ocr(),
       get_extraction_providers: () => [
+        { id: "system", label: "Built-in OCR - no install needed", needs_key: false, key_label: "", key_placeholder: "", key_help: "", default_model: "", group: "On this machine - free, nothing leaves it", api_base: "" },
         { id: "tesseract", label: "Tesseract - free, offline, no key", needs_key: false, key_label: "", key_placeholder: "", key_help: "", default_model: "", group: "On this machine - free, nothing leaves it", api_base: "" },
         { id: "ollama", label: "Local model (Ollama) - free, offline", needs_key: false, key_label: "", key_placeholder: "", key_help: "", default_model: "qwen2.5:3b", group: "On this machine - free, nothing leaves it", api_base: "" },
         { id: "claude", label: "Claude (Anthropic)", needs_key: true, key_label: "Anthropic API key", key_placeholder: "sk-ant-...", key_help: "Create one at console.anthropic.com under API Keys.", default_model: "claude-sonnet-5", group: "Cloud - needs an API key", api_base: "" },

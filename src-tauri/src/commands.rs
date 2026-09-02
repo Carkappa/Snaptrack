@@ -242,6 +242,43 @@ pub fn set_extraction_method<R: tauri::Runtime>(
         .map_err(|e| format!("Could not persist settings: {e}"))
 }
 
+/// Whether this machine has an OCR engine built into the operating
+/// system, so the method is only offered where it can actually run.
+#[tauri::command]
+pub fn system_ocr_available() -> bool {
+    crate::system_ocr::available()
+}
+
+/// Reads a screenshot with the operating system's own engine.
+///
+/// Returns the same shape the Tesseract path does, so click-to-fill and
+/// learning from corrections work here unchanged.
+#[tauri::command]
+pub async fn extract_with_system_ocr<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    image_base64: String,
+) -> Result<LocalOcrResult, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(image_base64)
+        .map_err(|e| format!("Invalid image data: {e}"))?;
+
+    let lines = crate::system_ocr::run(&bytes).await?;
+    let blocks: Vec<String> = lines.iter().map(|l| l.text.trim().to_string()).collect();
+    let mut fields = crate::local_ocr::guess_fields(&lines);
+
+    let site = crate::local_ocr::detect_site(&blocks.join("\n"));
+    if let Some(site) = site {
+        let hints = read_hints(&app, site);
+        crate::local_ocr::apply_hints(&mut fields, &blocks, &hints);
+    }
+
+    Ok(LocalOcrResult {
+        result: ExtractionResult::Parsed { fields },
+        blocks,
+        site: site.map(str::to_string),
+    })
+}
+
 #[tauri::command]
 pub fn local_ocr_available() -> bool {
     crate::local_ocr::tesseract_available()
@@ -1752,6 +1789,7 @@ async fn run_one<R: tauri::Runtime>(
     media_type: &str,
 ) -> Result<LocalOcrResult, String> {
     match provider {
+        "system" => extract_with_system_ocr(app.clone(), image_base64.to_string()).await,
         "tesseract" => extract_with_local_ocr(app.clone(), image_base64.to_string()),
         "ollama" => extract_with_ollama(app.clone(), image_base64.to_string()).await,
         _ => {
