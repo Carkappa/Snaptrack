@@ -8,7 +8,7 @@
 # before a release; `sha256` by ./scripts/update-checksums.sh <version>
 # after the release has built, since it hashes what CI actually produced.
 cask "job-tracker" do
-  version "0.6.1"
+  version "0.7.0"
   sha256 "9218d07d0107bd969c7d6e3e60f5742bcd407e00680064ff1daf67f2b55586ee"
 
   url "https://github.com/Carkappa/Snaptrack/releases/download/v#{version}/Job.Tracker_#{version}_aarch64.dmg",
