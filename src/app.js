@@ -1593,15 +1593,40 @@
     try {
       const path = await invoke("pick_excel_path");
       if (!path) return;
-      await invoke("set_excel_path", { path });
+
+      // Pointing somewhere else would otherwise start an empty workbook and
+      // strand the old one. Asked rather than assumed, since moving deletes
+      // the original.
+      let moveExisting = false;
+      if (await invoke("workbook_exists")) {
+        moveExisting = window.confirm(
+          "Move your existing workbook to the new location?\n\n" +
+            "Its backups and archived screenshots come with it, and the old " +
+            "copy is removed. Choose Cancel to leave it where it is and " +
+            "start fresh at the new path."
+        );
+      }
+
+      const result = await invoke("set_excel_path", { path, moveExisting });
       dom.settingsExcelPath.value = path;
       dom.settingsPathMessage.hidden = false;
-      dom.settingsPathMessage.textContent = "Saved.";
+      dom.settingsPathMessage.textContent = describePathChange(result);
     } catch (e) {
       dom.settingsPathMessage.hidden = false;
       dom.settingsPathMessage.textContent = String(e);
     }
   });
+
+  function describePathChange(result) {
+    if (!result || result.outcome === "Switched") return "Saved.";
+    if (result.outcome === "DestinationExists") {
+      return "Saved, but nothing was moved - a workbook is already there, and overwriting it would have destroyed one of them.";
+    }
+    const bits = ["Workbook moved"];
+    if (result.screenshots) bits.push(`${result.screenshots} screenshot${result.screenshots === 1 ? "" : "s"}`);
+    if (result.backups) bits.push(`${result.backups} backup${result.backups === 1 ? "" : "s"}`);
+    return bits.length > 1 ? `${bits.join(", ")} came too.` : "Workbook moved.";
+  }
 
   // ---------- Settings: import and statuses ----------
 

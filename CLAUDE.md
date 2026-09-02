@@ -67,6 +67,15 @@ about what a status looks like.
 
 [stats]: https://github.com/exelban/stats
 
+## Documentation
+
+`README.md` is for someone who has never run this and wants it working. Keep
+it short - roughly a screen and a half, and shorter if you can. Anything that
+is really about *building* the app belongs in `DEVELOPING.md`, and anything
+about *changing* it belongs here. When adding a feature, fold it into an
+existing line rather than adding a section; the README got to twice this
+length by growing a paragraph per release.
+
 ## Things that will bite you
 
 - **The single-instance plugin must stay registered first.** Two copies mean

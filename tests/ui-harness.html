@@ -77,6 +77,10 @@
       hotkeyRefuses: ["Ctrl+Alt+Delete"],
       seenWelcome: true,
       models: {},
+      workbookExists: true,
+      pickedExcelPath: "C:\\Users\\you\\Dropbox\\JobApplications.xlsx",
+      // What a mocked set_excel_path reports back.
+      pathChange: { outcome: "Moved", screenshots: 2, backups: 3 },
       ollamaHost: "http://localhost:11434",
       // Flip running to false, or empty models, to see the other states.
       ollama: { running: true, models: ["qwen2.5:3b"] },
@@ -96,7 +100,7 @@
       imagePath: "C:\\Users\\you\\Pictures\\posting.png",
       clipboardImage:
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-      importPath: "C:\Users\you\Documents\Other.xlsx",
+      importPath: "C:\\Users\\you\\Documents\\Other.xlsx",
       importRows: [
         { date_applied: "2026-08-20", company: "Datadog", position: "SRE", location: null, work_type: null, employment_type: null, salary_range: null, status: "Applied", last_updated: "2026-08-20", job_id: null, url: null, notes: null },
         { date_applied: "2026-09-01", company: "Amazon", position: "Robotics SDE Intern", location: null, work_type: null, employment_type: null, salary_range: null, status: "Applied", last_updated: "2026-09-01", job_id: null, url: null, notes: null },
@@ -163,7 +167,7 @@
       },
       screenshot_for_application: ({ company, position, dateApplied }) => {
         const key = [dateApplied, company, position].join("|");
-        return state.screenshots.includes(key) ? "C:\shots\\" + key + ".png" : null;
+        return state.screenshots.includes(key) ? "C:\\shots\\" + key + ".png" : null;
       },
       open_screenshot: ({ company, position, dateApplied }) => {
         const key = [dateApplied, company, position].join("|");
@@ -278,6 +282,7 @@
         return null;
       },
       get_ollama_host: () => state.ollamaHost,
+      workbook_exists: () => state.workbookExists,
       set_ollama_host: ({ host }) => {
         state.ollamaHost = host.trim() || "http://localhost:11434";
         return state.ollamaHost;
@@ -287,7 +292,11 @@
       read_clipboard_image: () => state.clipboardImage,
       pick_image_file: () => state.imagePath,
       read_image_file: () => ({ base64: state.clipboardImage, media_type: "image/png" }),
-      pick_excel_path: () => null,
+      pick_excel_path: () => state.pickedExcelPath,
+      set_excel_path: ({ path, moveExisting }) => {
+        state.calls.push({ cmd: "set_excel_path:moveExisting", args: { moveExisting } });
+        return moveExisting ? state.pathChange : { outcome: "Switched" };
+      },
       save_screenshot: () => "screenshot.png",
       open_url: ({ url }) => {
         if (state.openUrlFails) {

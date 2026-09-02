@@ -1096,21 +1096,28 @@ button.detail-row.active {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
+  gap: 3px;
   padding: 2px;
   font-family: inherit;
   transition: transform 0.08s ease, filter 0.12s ease;
 }
 
 .cal-day .cal-day-number {
-  font-size: 11px;
+  font-size: 11.5px;
+  font-weight: 500;
   line-height: 1;
 }
 
+/* The date is the label; the count is a detail beneath it. These were the
+   other way round - the count set larger than the date - which made every
+   day read as two numbers competing rather than a date with a count under
+   it. Tabular figures stop the grid twitching between 1 and 11. */
 .cal-day .cal-day-count {
-  font-size: 12.5px;
-  font-weight: 650;
+  font-size: 9.5px;
+  font-weight: 600;
   line-height: 1;
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
 }
 
 .cal-day.outside {

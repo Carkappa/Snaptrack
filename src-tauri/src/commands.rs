@@ -563,14 +563,146 @@ pub fn get_excel_path<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<Str
 }
 
 #[tauri::command]
-pub fn set_excel_path<R: tauri::Runtime>(app: tauri::AppHandle<R>, path: String) -> Result<(), String> {
+/// What happened when the workbook path changed.
+#[derive(Debug, serde::Serialize, PartialEq)]
+#[serde(tag = "outcome")]
+pub enum PathChange {
+    /// The path was pointed somewhere else, nothing was moved.
+    Switched,
+    Moved {
+        backups: usize,
+        screenshots: usize,
+    },
+    /// Something is already at the destination, so nothing was moved: the
+    /// path still changed, and both files are left intact.
+    DestinationExists,
+}
+
+#[tauri::command]
+pub fn workbook_exists<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    resolve_excel_path(&app).map(|p| p.is_file()).unwrap_or(false)
+}
+
+/// Moves a file, then removes the original.
+///
+/// Copy-then-remove rather than rename: a rename fails across volumes, and
+/// picking a folder on another drive is exactly what someone does when they
+/// move a workbook to a USB stick or a synced folder. Removing only after a
+/// successful copy means a failure loses nothing.
+fn move_file(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Could not create '{}': {e}", parent.display()))?;
+    }
+    std::fs::copy(from, to)
+        .map_err(|e| format!("Could not copy to '{}': {e}", to.display()))?;
+    std::fs::remove_file(from)
+        .map_err(|e| format!("Copied to '{}', but could not remove the original: {e}", to.display()))
+}
+
+/// Points the app at a different workbook, optionally taking the existing
+/// one with it.
+///
+/// The screenshots folder has to come along or every archived capture stops
+/// being findable, since it is located relative to the workbook. Backups
+/// follow too, but only the ones belonging to this workbook - another
+/// workbook may share the folder.
+#[tauri::command]
+pub fn set_excel_path<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+    move_existing: bool,
+) -> Result<PathChange, String> {
+    let old = resolve_excel_path(&app)?;
+    let new = PathBuf::from(&path);
+
     let store = app
         .store(STORE_FILE)
         .map_err(|e| format!("Could not open settings store: {e}"))?;
+
+    let mut outcome = PathChange::Switched;
+
+    if move_existing && old.is_file() && old != new {
+        if new.exists() {
+            // Never clobber a workbook that is already there - it may be
+            // the one being switched to on purpose.
+            outcome = PathChange::DestinationExists;
+        } else {
+            move_file(&old, &new)?;
+
+            let stem = old
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("JobApplications")
+                .to_string();
+            let backups = move_matching_backups(&old, &new, &stem);
+            let screenshots = move_screenshots(&old, &new);
+            outcome = PathChange::Moved {
+                backups,
+                screenshots,
+            };
+        }
+    }
+
     store.set(EXCEL_PATH_KEY, serde_json::json!(path));
     store
         .save()
-        .map_err(|e| format!("Could not persist settings: {e}"))
+        .map_err(|e| format!("Could not persist settings: {e}"))?;
+    Ok(outcome)
+}
+
+/// Best-effort: a workbook that moved without its backups is still usable,
+/// so a failure here must not fail the move.
+fn move_matching_backups(old: &std::path::Path, new: &std::path::Path, stem: &str) -> usize {
+    let (Some(old_dir), Some(new_dir)) = (old.parent(), new.parent()) else {
+        return 0;
+    };
+    let from = old_dir.join("backups");
+    let to = new_dir.join("backups");
+    let Ok(entries) = std::fs::read_dir(&from) else {
+        return 0;
+    };
+    let prefix = format!("{stem}_");
+    let mut moved = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else { continue };
+        // Only this workbook's backups; another may share the folder.
+        if !name_str.starts_with(&prefix) {
+            continue;
+        }
+        if move_file(&entry.path(), &to.join(name_str)).is_ok() {
+            moved += 1;
+        }
+    }
+    let _ = std::fs::remove_dir(&from); // only succeeds when now empty
+    moved
+}
+
+fn move_screenshots(old: &std::path::Path, new: &std::path::Path) -> usize {
+    let (Some(old_dir), Some(new_dir)) = (old.parent(), new.parent()) else {
+        return 0;
+    };
+    let from = old_dir.join(SCREENSHOTS_DIR);
+    let to = new_dir.join(SCREENSHOTS_DIR);
+    let Ok(entries) = std::fs::read_dir(&from) else {
+        return 0;
+    };
+    let mut moved = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else { continue };
+        let target = to.join(name_str);
+        // Never overwrite a capture already at the destination.
+        if target.exists() {
+            continue;
+        }
+        if move_file(&entry.path(), &target).is_ok() {
+            moved += 1;
+        }
+    }
+    let _ = std::fs::remove_dir(&from);
+    moved
 }
 
 #[tauri::command]

@@ -158,6 +158,7 @@ pub fn run() {
             commands::extract_from_image,
             commands::get_excel_path,
             commands::set_excel_path,
+            commands::workbook_exists,
             commands::pick_excel_path,
             commands::pick_image_file,
             commands::read_image_file,
