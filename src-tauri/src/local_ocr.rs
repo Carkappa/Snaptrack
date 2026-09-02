@@ -132,6 +132,107 @@ pub struct OcrLine {
     pub text: String,
     pub top: f32,
     pub height: f32,
+    /// The individual text lines this block was built from, with each
+    /// line's height. Tesseract often puts a company name and the job
+    /// title in one paragraph; the only thing separating them is that the
+    /// company is set smaller, which is lost once the block is flattened.
+    pub sub_lines: Vec<SubLine>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubLine {
+    pub text: String,
+    pub height: f32,
+}
+
+impl OcrLine {
+    /// Convenience for tests and callers that don't care about sub-lines.
+    pub fn flat(text: &str, top: f32, height: f32) -> Self {
+        Self {
+            text: text.to_string(),
+            top,
+            height,
+            sub_lines: vec![SubLine {
+                text: text.to_string(),
+                height,
+            }],
+        }
+    }
+}
+
+/// A first line noticeably smaller than the rest of its block is a
+/// different thing from what follows - on every job board that means the
+/// company sitting above the title.
+const COMPANY_LINE_RATIO: f32 = 0.75;
+
+/// Splits a block whose first line is set smaller than the rest into
+/// (company, title). Returns None when the block is all one size, which is
+/// the normal case for a title that simply wrapped.
+fn split_company_from_title(block: &OcrLine) -> Option<(String, String)> {
+    if block.sub_lines.len() < 2 {
+        return None;
+    }
+    let first = &block.sub_lines[0];
+    let rest = &block.sub_lines[1..];
+    let rest_max = rest.iter().fold(0.0_f32, |acc, l| acc.max(l.height));
+    if rest_max <= 0.0 || first.height >= rest_max * COMPANY_LINE_RATIO {
+        return None;
+    }
+    let company = first.text.trim();
+    let title = rest
+        .iter()
+        .map(|l| l.text.trim())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if company.is_empty() || title.is_empty() || company.chars().count() > 80 {
+        return None;
+    }
+    Some((company.to_string(), title))
+}
+
+/// Short suffixes that really are part of a company name, so they survive
+/// the noise strip below.
+const COMPANY_SUFFIXES: [&str; 10] = [
+    "co", "inc", "llc", "ltd", "plc", "ag", "sa", "bv", "nv", "gmbh",
+];
+
+/// Removes OCR debris from the edges of a short value.
+///
+/// Icons and badges next to a company or location get read as stray
+/// tokens - a tick becomes "cee", a pin becomes "Y" - and they end up
+/// glued to the value. A leading single character is never the start of a
+/// real name, and a trailing lower-case fragment is not a company suffix
+/// unless it is one of the handful that exist.
+fn strip_edge_noise(value: &str) -> String {
+    let mut tokens: Vec<&str> = value.split_whitespace().collect();
+
+    while let Some(first) = tokens.first() {
+        let bare = first.trim_matches(|c: char| !c.is_alphanumeric());
+        if tokens.len() > 1 && bare.chars().count() <= 1 {
+            tokens.remove(0);
+        } else {
+            break;
+        }
+    }
+
+    while let Some(last) = tokens.last() {
+        let bare: String = last
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase();
+        let is_noise = tokens.len() > 1
+            && bare.chars().count() <= 3
+            && !bare.is_empty()
+            && bare.chars().all(|c| c.is_ascii_lowercase())
+            && !COMPANY_SUFFIXES.contains(&bare.as_str())
+            && last.chars().all(|c| !c.is_ascii_uppercase());
+        if is_noise {
+            tokens.pop();
+        } else {
+            break;
+        }
+    }
+
+    tokens.join(" ").trim().to_string()
 }
 
 pub fn run_ocr(image_bytes: &[u8]) -> Result<Vec<OcrLine>, String> {
@@ -245,6 +346,9 @@ fn parse_tesseract_tsv(tsv: &str) -> Vec<OcrLine> {
         top: f32,
         right: f32,
         bottom: f32,
+        /// Words kept per text line, so a block's internal type sizes
+        /// survive into `sub_lines`.
+        lines: Vec<(i64, Vec<String>, f32)>,
     }
 
     let mut groups: Vec<Group> = Vec::new();
@@ -266,6 +370,7 @@ fn parse_tesseract_tsv(tsv: &str) -> Vec<OcrLine> {
             (Ok(b), Ok(p)) => (b, p),
             _ => continue,
         };
+        let line_num = cols[4].parse::<i64>().unwrap_or(0);
         let (left, top, width, height) = match (
             cols[6].parse::<f32>(),
             cols[7].parse::<f32>(),
@@ -284,6 +389,13 @@ fn parse_tesseract_tsv(tsv: &str) -> Vec<OcrLine> {
                 g.top = g.top.min(top);
                 g.right = g.right.max(left + width);
                 g.bottom = g.bottom.max(top + height);
+                match g.lines.last_mut() {
+                    Some((n, words, h)) if *n == line_num => {
+                        words.push(text.to_string());
+                        *h = h.max(height);
+                    }
+                    _ => g.lines.push((line_num, vec![text.to_string()], height)),
+                }
             }
             _ => groups.push(Group {
                 key,
@@ -292,6 +404,7 @@ fn parse_tesseract_tsv(tsv: &str) -> Vec<OcrLine> {
                 top,
                 right: left + width,
                 bottom: top + height,
+                lines: vec![(line_num, vec![text.to_string()], height)],
             }),
         }
     }
@@ -302,6 +415,14 @@ fn parse_tesseract_tsv(tsv: &str) -> Vec<OcrLine> {
             text: g.words.join(" "),
             top: g.top,
             height: g.bottom - g.top,
+            sub_lines: g
+                .lines
+                .into_iter()
+                .map(|(_, words, height)| SubLine {
+                    text: words.join(" "),
+                    height,
+                })
+                .collect(),
         })
         .collect()
 }
@@ -336,12 +457,15 @@ fn posted_date_re() -> &'static Regex {
     regex_cell(&RE, r"(?i)\b\d+\s*(?:day|days|hour|hours|week|weeks|month|months)\s+ago\b")
 }
 
-const WORK_TYPE_KEYWORDS: [(&str, &str); 5] = [
+const WORK_TYPE_KEYWORDS: [(&str, &str); 8] = [
     ("remote", "Remote"),
     ("hybrid", "Hybrid"),
     ("on-site", "On-site"),
+    ("on site", "On-site"),
     ("onsite", "On-site"),
     ("in-office", "On-site"),
+    ("in office", "On-site"),
+    ("in-person", "On-site"),
 ];
 
 const EMPLOYMENT_TYPE_KEYWORDS: [(&str, &str); 8] = [
@@ -384,15 +508,31 @@ pub fn guess_fields(lines: &[OcrLine]) -> ExtractedFields {
         .max_by(|(_, a), (_, b)| a.height.partial_cmp(&b.height).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i);
 
-    let position = title_index.map(|i| sorted[i].text.trim().to_string());
+    // Tesseract often folds the company and the title into one paragraph.
+    // When it has, the company is the smaller first line of that block
+    // rather than a block above it, and reading it the old way leaves the
+    // company empty and the title carrying the company name.
+    let split = title_index.and_then(|i| split_company_from_title(sorted[i]));
 
-    let company = title_index.and_then(|i| {
-        (0..i)
-            .rev()
-            .map(|j| sorted[j].text.trim())
-            .find(|t| !t.is_empty() && t.chars().count() <= 80)
-            .map(|t| t.to_string())
-    });
+    let position = match &split {
+        Some((_, title)) => Some(title.clone()),
+        None => title_index.map(|i| sorted[i].text.trim().to_string()),
+    };
+
+    let company = match &split {
+        Some((company, _)) => Some(company.clone()),
+        None => title_index.and_then(|i| {
+            (0..i)
+                .rev()
+                .map(|j| sorted[j].text.trim())
+                .find(|t| !t.is_empty() && t.chars().count() <= 80)
+                .map(|t| t.to_string())
+        }),
+    };
+
+    let company = company
+        .map(|c| strip_edge_noise(&c))
+        .filter(|c| !c.is_empty());
 
     let mut location = None;
     let mut work_type = None;
@@ -406,7 +546,10 @@ pub fn guess_fields(lines: &[OcrLine]) -> ExtractedFields {
 
         if location.is_none() {
             if let Some(m) = location_re().find(&line.text) {
-                location = Some(m.as_str().trim().to_string());
+                let cleaned = strip_edge_noise(m.as_str().trim());
+                if !cleaned.is_empty() {
+                    location = Some(cleaned);
+                }
             }
         }
         // The title itself is excluded from the work/employment-type scan:
@@ -465,11 +608,7 @@ mod tests {
     use super::*;
 
     fn line(text: &str, top: f32, height: f32) -> OcrLine {
-        OcrLine {
-            text: text.to_string(),
-            top,
-            height,
-        }
+        OcrLine::flat(text, top, height)
     }
 
     /// Mirrors the real LinkedIn screenshot used to manually verify this
@@ -679,10 +818,10 @@ mod tests {
 
     #[test]
     fn the_run_that_read_the_most_text_wins() {
-        let sparse = vec![OcrLine { text: "Acme".into(), top: 0.0, height: 10.0 }];
+        let sparse = vec![OcrLine::flat("Acme", 0.0, 10.0)];
         let full = vec![
-            OcrLine { text: "Acme Corporation".into(), top: 0.0, height: 20.0 },
-            OcrLine { text: "Senior Engineer".into(), top: 30.0, height: 14.0 },
+            OcrLine::flat("Acme Corporation", 0.0, 20.0),
+            OcrLine::flat("Senior Engineer", 30.0, 14.0),
         ];
         assert!(
             reading_score(&full) > reading_score(&sparse),
@@ -692,8 +831,8 @@ mod tests {
 
     #[test]
     fn whitespace_does_not_inflate_the_score() {
-        let padded = vec![OcrLine { text: "a b".into(), top: 0.0, height: 1.0 }];
-        let solid_text = vec![OcrLine { text: "abc".into(), top: 0.0, height: 1.0 }];
+        let padded = vec![OcrLine::flat("a b", 0.0, 1.0)];
+        let solid_text = vec![OcrLine::flat("abc", 0.0, 1.0)];
         assert!(reading_score(&solid_text) > reading_score(&padded));
     }
 
@@ -708,5 +847,164 @@ mod tests {
         assert!(PSM_MODES.contains(&"6"), "single uniform block");
         assert!(PSM_MODES.contains(&"3"), "auto page segmentation");
         assert!(PSM_MODES.contains(&"11"), "sparse text");
+    }
+
+    // ---- the real LinkedIn card that came back wrong ----
+
+    /// Reproduces what Tesseract actually produced for the Amazon posting:
+    /// the company, the title, the location line and the metadata all
+    /// folded into a single paragraph, with the logo tick read as "cee"
+    /// and the location pin as "Y". The company came back empty and the
+    /// title carried "Amazon cee" on the front.
+    fn merged_amazon_block() -> Vec<OcrLine> {
+        vec![
+            OcrLine {
+                text: "Amazon cee Robotics - Software Development Engineer Fall Intern/Co-op - 2026 Y Westboro, WI - 5 days ago - 42 people clicked apply".into(),
+                top: 10.0,
+                height: 90.0,
+                sub_lines: vec![
+                    SubLine { text: "Amazon cee".into(), height: 12.0 },
+                    SubLine { text: "Robotics - Software Development Engineer Fall".into(), height: 21.0 },
+                    SubLine { text: "Intern/Co-op - 2026".into(), height: 21.0 },
+                    SubLine { text: "Y Westboro, WI - 5 days ago - 42 people clicked apply".into(), height: 11.0 },
+                ],
+            },
+            OcrLine::flat("On-site Full-time", 120.0, 12.0),
+        ]
+    }
+
+    #[test]
+    fn a_merged_company_and_title_block_is_split() {
+        let f = guess_fields(&merged_amazon_block());
+        assert_eq!(
+            f.company.as_deref(),
+            Some("Amazon"),
+            "the company is the smaller first line of the merged block"
+        );
+        let position = f.position.unwrap();
+        assert!(
+            position.starts_with("Robotics - Software Development Engineer"),
+            "the title must not carry the company on the front, got {position:?}"
+        );
+        assert!(
+            !position.contains("Amazon"),
+            "the company must not remain in the title, got {position:?}"
+        );
+    }
+
+    #[test]
+    fn icon_debris_is_stripped_from_the_company_and_location() {
+        let f = guess_fields(&merged_amazon_block());
+        assert_eq!(f.company.as_deref(), Some("Amazon"), "the tick read as 'cee' is dropped");
+        assert_eq!(
+            f.location.as_deref(),
+            Some("Westboro, WI"),
+            "the pin read as 'Y' is dropped from the front of the location"
+        );
+    }
+
+    #[test]
+    fn the_chips_beside_the_title_are_read() {
+        let f = guess_fields(&merged_amazon_block());
+        assert_eq!(f.work_type.as_deref(), Some("On-site"));
+        assert_eq!(f.employment_type.as_deref(), Some("Full-time"));
+    }
+
+    // ---- the splitting rule itself ----
+
+    #[test]
+    fn a_title_that_merely_wrapped_is_not_split() {
+        // Every line the same size: one long title, no company in it.
+        let block = OcrLine {
+            text: "Senior Software Development Engineer Fall Intern".into(),
+            top: 0.0,
+            height: 40.0,
+            sub_lines: vec![
+                SubLine { text: "Senior Software Development".into(), height: 20.0 },
+                SubLine { text: "Engineer Fall Intern".into(), height: 20.0 },
+            ],
+        };
+        assert!(
+            split_company_from_title(&block).is_none(),
+            "a wrapped title must stay whole"
+        );
+    }
+
+    #[test]
+    fn a_single_line_block_is_never_split() {
+        assert!(split_company_from_title(&OcrLine::flat("Acme", 0.0, 10.0)).is_none());
+    }
+
+    #[test]
+    fn a_first_line_only_slightly_smaller_is_not_a_company() {
+        let block = OcrLine {
+            text: "a b".into(),
+            top: 0.0,
+            height: 30.0,
+            sub_lines: vec![
+                SubLine { text: "Almost the same size".into(), height: 19.0 },
+                SubLine { text: "as the line below it".into(), height: 20.0 },
+            ],
+        };
+        assert!(split_company_from_title(&block).is_none());
+    }
+
+    // ---- edge-noise stripping ----
+
+    #[test]
+    fn strips_a_stray_leading_character() {
+        assert_eq!(strip_edge_noise("Y Westboro, WI"), "Westboro, WI");
+        assert_eq!(strip_edge_noise("© Remote"), "Remote");
+        assert_eq!(strip_edge_noise("9 San Francisco, CA"), "San Francisco, CA");
+    }
+
+    #[test]
+    fn strips_a_trailing_lowercase_fragment() {
+        assert_eq!(strip_edge_noise("Amazon cee"), "Amazon");
+        assert_eq!(strip_edge_noise("Stripe wv"), "Stripe");
+    }
+
+    #[test]
+    fn keeps_real_company_suffixes_and_state_codes() {
+        assert_eq!(strip_edge_noise("Acme Inc"), "Acme Inc");
+        assert_eq!(strip_edge_noise("Widgets Co"), "Widgets Co");
+        assert_eq!(strip_edge_noise("Foo GmbH"), "Foo GmbH");
+        assert_eq!(
+            strip_edge_noise("Westboro, WI"),
+            "Westboro, WI",
+            "a two-letter state code is not debris"
+        );
+    }
+
+    #[test]
+    fn never_strips_a_value_down_to_nothing() {
+        assert_eq!(strip_edge_noise("Y"), "Y");
+        assert_eq!(strip_edge_noise("cee"), "cee");
+        assert_eq!(strip_edge_noise(""), "");
+        assert_eq!(strip_edge_noise("IBM"), "IBM");
+        assert_eq!(strip_edge_noise("X Corp"), "Corp");
+    }
+
+    // ---- sub-lines survive parsing ----
+
+    #[test]
+    fn the_parser_keeps_each_lines_height() {
+        // level, page, block, par, line, word, left, top, width, height, conf, text
+        let tsv = "level	page	block	par	line	word	left	top	width	height	conf	text
+5	1	1	1	1	1	10	10	50	12	95	Amazon
+5	1	1	1	2	1	10	30	200	22	95	Robotics
+5	1	1	1	2	2	220	30	60	22	95	Engineer
+";
+        let lines = parse_tesseract_tsv(tsv);
+        assert_eq!(lines.len(), 1, "one paragraph");
+        assert_eq!(lines[0].sub_lines.len(), 2, "two text lines inside it");
+        assert_eq!(lines[0].sub_lines[0].text, "Amazon");
+        assert_eq!(lines[0].sub_lines[0].height, 12.0);
+        assert_eq!(lines[0].sub_lines[1].text, "Robotics Engineer");
+        assert_eq!(lines[0].sub_lines[1].height, 22.0);
+
+        let (company, title) = split_company_from_title(&lines[0]).expect("should split");
+        assert_eq!(company, "Amazon");
+        assert_eq!(title, "Robotics Engineer");
     }
 }
