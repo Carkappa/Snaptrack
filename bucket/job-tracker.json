@@ -1,11 +1,11 @@
 {
-    "version": "0.7.0",
+    "version": "0.8.0",
     "description": "Tray-based job application tracker that saves straight to Excel",
     "homepage": "https://github.com/Carkappa/Snaptrack",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/Carkappa/Snaptrack/releases/download/v0.7.0/Job.Tracker_0.7.0_x64-setup.exe#/setup.exe",
+            "url": "https://github.com/Carkappa/Snaptrack/releases/download/v0.8.0/Job.Tracker_0.8.0_x64-setup.exe#/setup.exe",
             "hash": "046f5358efefdb774ef49f1f6c6dcccb6aaaad844b5f8e25035e8172e0c3356e"
         }
     },
@@ -27,7 +27,7 @@
     "autoupdate": {
         "architecture": {
             "64bit": {
-                "url": "https://github.com/Carkappa/Snaptrack/releases/download/v0.7.0/Job.Tracker_0.7.0_x64-setup.exe#/setup.exe"
+                "url": "https://github.com/Carkappa/Snaptrack/releases/download/v0.8.0/Job.Tracker_0.8.0_x64-setup.exe#/setup.exe"
             }
         }
     },
