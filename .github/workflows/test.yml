@@ -66,7 +66,7 @@ jobs:
       # A command the frontend calls but nobody registered fails only in
       # the built app - Rust compiles, and the harness mocks invoke by name.
       - name: Check every invoked command is registered
-        run: ./scripts/check-commands.sh
+        run: bash scripts/check-commands.sh
 
       - name: Run the frontend tests in headless Chrome
         run: |

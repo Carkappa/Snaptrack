@@ -262,8 +262,7 @@ pub fn extract_with_local_ocr<R: tauri::Runtime>(
 
     // What the user corrected last time on this board beats the layout
     // heuristics, which have no way of knowing this page is unusual.
-    let site = crate::local_ocr::detect_site(&blocks.join("
-"));
+    let site = crate::local_ocr::detect_site(&blocks.join("\n"));
     if let Some(site) = site {
         let hints = read_hints(&app, site);
         crate::local_ocr::apply_hints(&mut fields, &blocks, &hints);
@@ -409,8 +408,7 @@ pub async fn pull_ollama_model<R: tauri::Runtime>(
         .map_err(|e| format!("The download stopped: {e}"))?
     {
         buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(newline) = buffer.find('
-') {
+        while let Some(newline) = buffer.find('\n') {
             let line: String = buffer.drain(..=newline).collect();
             let line = line.trim();
             if line.is_empty() {
@@ -464,8 +462,7 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
     }
 
     let blocks: Vec<String> = lines.iter().map(|l| l.text.trim().to_string()).collect();
-    let site = crate::local_ocr::detect_site(&blocks.join("
-"));
+    let site = crate::local_ocr::detect_site(&blocks.join("\n"));
 
     let host = resolve_ollama_host(&app);
     let preferred = resolve_model(&app, "ollama");
@@ -481,8 +478,7 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
             })?,
         None => preferred,
     };
-    let result = extraction::extract_fields_from_text(&host, &model, &blocks.join("
-")).await?;
+    let result = extraction::extract_fields_from_text(&host, &model, &blocks.join("\n")).await?;
 
     Ok(LocalOcrResult {
         result,
