@@ -85,7 +85,15 @@ about what a status looks like.
   release itself. Making one by hand from a tag creates a *second*, empty
   release on that tag - GitHub allows it - and the installers CI built stay
   attached to the other one.
-- **Updates are unsigned until a key exists.** `tauri.conf.json` carries a
+- **The macOS updater needs the `app` bundle target.** Without it,
+  `latest.json` carries only Windows entries and a Mac never updates, even
+  though the `.dmg` builds fine.
+- **The signing key must have a password.** A passwordless (`-W`) minisign
+  key builds on macOS and fails on Windows with "Wrong password for that
+  key", with and without `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` set to empty.
+- **`--config` in the release workflow resolves from the repo root**, not
+  from `src-tauri`.
+- **Updates were unsigned until a key existed.** `tauri.conf.json` carries a
   placeholder `pubkey`; `updates.rs` detects it and reports that plainly
   instead of failing with a signature error. See the README for the setup.
 - **Escape through `format.js`, never `textContent`/`innerHTML`.** That trick

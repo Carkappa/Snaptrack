@@ -90,12 +90,13 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Job Tracker ${{ github.ref_name }}"
+          # This text also becomes the `notes` field in latest.json, which is
+          # what an installed copy shows when it offers the update.
           releaseBody: |
-            Unsigned build - see the README for the Gatekeeper / SmartScreen
-            warnings you'll need to click through on first launch.
+            Installed copies pick this up automatically.
 
-            Installed copies pick this up automatically, once a signing
-            keypair is configured for the repository.
+            The build is not code-signed, so Windows SmartScreen and macOS
+            Gatekeeper warn on a fresh install - see the README.
           # Published straight away. Leaving it as a draft meant the tag and
           # the built installers could drift apart - it is easy to "publish"
           # from the tag page, which creates a second, empty release instead
