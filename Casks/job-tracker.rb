@@ -9,7 +9,7 @@
 # after the release has built, since it hashes what CI actually produced.
 cask "job-tracker" do
   version "0.6.1"
-  sha256 "fcea0687d2bdb6db10b8fc4e74e906dd156fb61c6b121d048b0b2e04980bbdb8"
+  sha256 "9218d07d0107bd969c7d6e3e60f5742bcd407e00680064ff1daf67f2b55586ee"
 
   url "https://github.com/Carkappa/Snaptrack/releases/download/v#{version}/Job.Tracker_#{version}_aarch64.dmg",
       verified: "github.com/Carkappa/Snaptrack/"
