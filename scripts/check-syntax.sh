@@ -31,10 +31,14 @@ ALLOW = (
     re.compile(r"replace\('\"'"),        # escaping a quote for HTML
 )
 
+# rglob, not glob: system_ocr.rs became system_ocr/ with a file per
+# platform, and a non-recursive glob silently stopped checking all three.
+# A guard that quietly covers less than it did is worse than none.
 files = (
-    sorted(Path("src").glob("*.js"))
-    + sorted(Path("src-tauri/src").glob("*.rs"))
-    + sorted(Path("src-tauri/tests").glob("*.rs"))
+    sorted(Path("src").rglob("*.js"))
+    + sorted(Path("tests").rglob("*.js"))
+    + sorted(Path("src-tauri/src").rglob("*.rs"))
+    + sorted(Path("src-tauri/tests").rglob("*.rs"))
 )
 
 failures = []

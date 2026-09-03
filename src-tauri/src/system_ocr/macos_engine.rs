@@ -71,8 +71,11 @@ pub fn recognise(image_bytes: &[u8]) -> Result<Vec<OcrLine>, String> {
         request.setUsesLanguageCorrection(true);
     }
 
-    let requests: Retained<NSArray<VNRequest>> =
-        NSArray::from_retained_slice(&[Retained::into_super(request.clone())]);
+    // Two hops, not one: the chain is VNRecognizeTextRequest ->
+    // VNImageBasedRequest -> VNRequest, and performRequests wants the base.
+    let base: Retained<VNRequest> =
+        Retained::into_super(Retained::into_super(request.clone()));
+    let requests: Retained<NSArray<VNRequest>> = NSArray::from_retained_slice(&[base]);
     unsafe {
         handler
             .performRequests_error(&requests)
