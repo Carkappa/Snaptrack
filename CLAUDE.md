@@ -133,8 +133,10 @@ click-to-fill and correction-learning work the same behind any of them:
 
 - `system_ocr/` - the OS engine, one file per platform behind a dispatcher.
   `windows_engine.rs` is Windows.Media.Ocr, `macos_engine.rs` is Vision.
-  Linux has no equivalent and falls back. `available()` gates whether the
-  method is offered at all. Shared work - the median word height, the
+  Linux has no equivalent and falls back. `available()` decides the
+  first-run default and what the Settings status line says; it does *not*
+  filter the dropdown, so the method is listed everywhere and explains
+  itself where it cannot run. Shared work - the median word height, the
   reading-order sort, the empty-image error - lives in `mod.rs` so the two
   engines cannot drift on what they return. Vision reports normalised
   boxes with the origin bottom-left, so `macos_engine.rs` flips and scales
@@ -144,10 +146,29 @@ click-to-fill and correction-learning work the same behind any of them:
 - The cloud and Ollama vision paths, which return fields rather than
   blocks.
 
+Which engine runs is not always the method the user picked. Picking
+Tesseract runs Tesseract - anything else would be a lie. But the Ollama
+method only wants text, so it takes the OS engine where there is one and
+falls back to Tesseract, which is why choosing a local model no longer
+means installing Tesseract as well. `read_with_best_engine` in
+`commands.rs` is that choice, in one place.
+
 `tests/system_ocr.rs` runs against the real engine and skips where there
-isn't one, so it genuinely tests on Windows and honestly does nothing in CI.
+isn't one. It used to do nothing in CI; the `macos` job in `test.yml`
+exists so it actually runs somewhere, and that job is the only check on
+the macOS code at all - the other two jobs are Linux, where none of it
+compiles. Expect to find macOS mistakes there rather than locally.
 
 ## Things that will bite you
+
+- **The first-run default is computed, not a constant.** A machine with
+  nothing stored gets its OS engine, and only Linux starts on Tesseract.
+  `models::DEFAULT_PROVIDER` is still `tesseract` and is only the
+  last-resort lookup for `provider_or_default`; the first-run value comes
+  from `default_extraction_method()`. Upgrading users who never opened
+  Settings move to the OS engine, which is the point - the old constant
+  meant their first capture failed with "Tesseract not found" while a
+  working engine sat unused.
 
 - **The single-instance plugin must stay registered first.** Two copies mean
   two tray icons, a global shortcut owned by whichever started first, and two

@@ -563,19 +563,28 @@ pub async fn pull_ollama_model<R: tauri::Runtime>(
 /// The OS engine first because it needs no install - the Ollama method
 /// used to demand a Tesseract install on machines that already had a
 /// working engine the rest of the app was using. Tesseract stays as the
-/// fallback, and its error is the one reported when neither works, since
-/// on a machine with no OS engine that is the one the user can fix.
+/// fallback, since an engine that is present can still refuse a
+/// particular image.
+///
+/// Which error comes back matters. Reporting Tesseract's when the machine
+/// has its own engine tells the user to install something they do not
+/// need, so the OS engine's failure is the one that survives; Tesseract's
+/// is only reported on a machine where it is the only engine there is.
 async fn read_with_best_engine(bytes: &[u8]) -> Result<Vec<crate::local_ocr::OcrLine>, String> {
-    if crate::system_ocr::available() {
+    let system_error = if crate::system_ocr::available() {
         match crate::system_ocr::run(bytes).await {
             Ok(lines) => return Ok(lines),
-            // Falling through rather than failing: an engine that is
-            // present can still refuse a particular image, and Tesseract
-            // may well read it.
-            Err(_) => {}
+            Err(e) => Some(e),
         }
+    } else {
+        None
+    };
+
+    match (crate::local_ocr::run_ocr(bytes), system_error) {
+        (Ok(lines), _) => Ok(lines),
+        (Err(_), Some(system_error)) => Err(system_error),
+        (Err(tesseract_error), None) => Err(tesseract_error),
     }
-    crate::local_ocr::run_ocr(bytes)
 }
 
 /// Reads the screenshot with whichever OCR engine this machine has, then
