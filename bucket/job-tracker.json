@@ -6,7 +6,7 @@
     "architecture": {
         "64bit": {
             "url": "https://github.com/Carkappa/Snaptrack/releases/download/v0.13.0/Job.Tracker_0.13.0_x64-setup.exe#/setup.exe",
-            "hash": "1d28190242ae21e425b331dffb42ac5d5b3e78183bf40e31ae64e87c1b5e8e72"
+            "hash": "c7f8a069ee3660e2b93bb0c1af913330e079e5b61f458377d4122e970138e841"
         }
     },
     "installer": {
