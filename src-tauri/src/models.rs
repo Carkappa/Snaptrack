@@ -820,6 +820,10 @@ pub struct JobApplication {
     pub url: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
+    /// Path of the tailored resume sent for this application, once one has
+    /// been saved. The question weeks later is "what did I send them?".
+    #[serde(default)]
+    pub resume: Option<String>,
 }
 
 fn default_status() -> String {

@@ -1892,6 +1892,35 @@ pub fn get_master_resume<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<
     }
 }
 
+/// Picks a resume file to import from.
+#[tauri::command]
+pub async fn pick_resume_file<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .add_filter("Resume", &["pdf", "docx", "txt", "md"])
+        .pick_file(move |file_path| {
+            let _ = tx.send(file_path);
+        });
+    let result = rx.recv().map_err(|e| format!("File dialog failed: {e}"))?;
+    Ok(result.map(|p| p.to_string()))
+}
+
+/// Reads a resume out of a PDF, a Word file or plain text, and stores it
+/// as the master.
+#[tauri::command]
+pub fn import_resume_file<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<String, String> {
+    let text = crate::resume::import_text(std::path::Path::new(&path))?;
+    set_master_resume(app, text.clone())?;
+    Ok(text)
+}
+
 /// Saves the master resume beside the workbook, as a plain file the user
 /// can open and edit in anything.
 #[tauri::command]
@@ -2001,16 +2030,54 @@ pub fn save_tailored_resume<R: tauri::Runtime>(
     std::fs::write(&tex_path, crate::resume_render::to_latex(&resume))
         .map_err(|e| format!("Could not save '{}': {e}", tex_path.display()))?;
 
+    // Record it against the application, so the row answers "what did I
+    // send them?" the way it already answers "what did the posting say?".
+    let pdf = pdf_path.to_string_lossy().to_string();
+    let linked = link_resume_to_row(&app, &workbook, &company, &position, &pdf).unwrap_or(false);
+
     Ok(SavedResume {
-        pdf: pdf_path.to_string_lossy().to_string(),
+        pdf,
         tex: tex_path.to_string_lossy().to_string(),
+        linked,
     })
+}
+
+/// Writes the resume path onto the matching row.
+///
+/// Best-effort: the files are already written, and failing the save
+/// because the workbook was open in Excel would lose the resume for no
+/// reason. Matched the same way duplicate detection is, so a row saved
+/// with different capitalisation still matches.
+fn link_resume_to_row<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    workbook: &std::path::Path,
+    company: &str,
+    position: &str,
+    pdf: &str,
+) -> Result<bool, String> {
+    if company.trim().is_empty() && position.trim().is_empty() {
+        return Ok(false);
+    }
+    let mut rows = excel::read_applications(workbook)?;
+    let key = (
+        company.trim().to_lowercase(),
+        position.trim().to_lowercase(),
+    );
+    let Some(row) = rows.iter_mut().find(|r| r.dedupe_key() == key) else {
+        return Ok(false);
+    };
+    row.resume = Some(pdf.to_string());
+    excel::write_applications(workbook, &rows, &status_names(app))?;
+    Ok(true)
 }
 
 #[derive(serde::Serialize)]
 pub struct SavedResume {
     pub pdf: String,
     pub tex: String,
+    /// False when no saved application matched - a resume tailored from a
+    /// pasted posting has no row to attach itself to.
+    pub linked: bool,
 }
 
 /// Opens a saved resume in whatever the system uses for Markdown.

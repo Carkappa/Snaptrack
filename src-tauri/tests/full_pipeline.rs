@@ -51,6 +51,7 @@ fn amazon_application() -> JobApplication {
         job_id: None,
         url: Some("https://www.linkedin.com/jobs/view/example-4123456789".into()),
         notes: None,
+        resume: None,
     }
 }
 

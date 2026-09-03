@@ -44,7 +44,7 @@
     // rows below are shaped exactly like what `list_applications` returns.
 
     const FIXTURES = [
-      { date_applied: "2026-09-01", company: "Amazon", position: "Robotics SDE Intern", location: "Westboro, WI", work_type: "On-site", employment_type: "Internship", salary_range: null, status: "Applied", last_updated: "2026-09-01", job_id: "4123456789", url: "https://example.com/1", notes: null },
+      { date_applied: "2026-09-01", company: "Amazon", position: "Robotics SDE Intern", location: "Westboro, WI", work_type: "On-site", employment_type: "Internship", salary_range: null, status: "Applied", last_updated: "2026-09-01", job_id: "4123456789", url: "https://example.com/1", notes: null, resume: "C:/Users/you/Documents/Resumes/Amazon-Robotics-SDE-Intern.pdf" },
       { date_applied: "2026-09-01", company: "Stripe", position: "Backend Engineer", location: "Remote", work_type: "Remote", employment_type: "Full-time", salary_range: "$150k - $190k", status: "Interviewing", last_updated: "2026-09-01", job_id: null, url: null, notes: null },
       { date_applied: "2026-09-01", company: "Figma", position: "Product Engineer", location: "San Francisco, CA", work_type: "Hybrid", employment_type: "Full-time", salary_range: null, status: "Applied", last_updated: "2026-09-01", job_id: null, url: null, notes: null },
       { date_applied: "2026-09-01", company: "Linear", position: "Frontend Engineer", location: "Remote", work_type: "Remote", employment_type: "Full-time", salary_range: null, status: "Rejected", last_updated: "2026-09-01", job_id: null, url: null, notes: null },
@@ -67,6 +67,8 @@
       updateResponse: { outcome: "UpToDate" },
       installUpdateCalls: 0,
       installUpdateFails: false,
+      pickResumeCancels: false,
+      importResumeFails: false,
       openedUrls: [],
       // Set true to exercise the rejection path the Rust scheme check produces.
       openUrlFails: false,
@@ -375,9 +377,18 @@
         return `Key works. 6 models available, including: protected.gpt-4o.`;
       },
       get_master_resume: () => state.masterResume,
+      pick_resume_file: () =>
+        state.pickResumeCancels ? null : "C:/Users/you/Documents/Resume.pdf",
+      import_resume_file: ({ path }) => {
+        if (state.importResumeFails) throw new Error("No readable text in that file.");
+        state.masterResume =
+          "Jun Du" + "\n" + "Imported from " + path + "\n" + "\n" +
+          "Experience" + "\n" + "- Built a job tracker";
+        return state.masterResume;
+      },
       set_master_resume: ({ text }) => {
         state.masterResume = text;
-        return "C:\Users\you\Documents\Resume_master.md";
+        return "C:/Users/you/Documents/Resume_master.md";
       },
       tailor_resume: ({ company, position, pasted }) => {
         if (!state.masterResume.trim()) {
@@ -418,7 +429,14 @@
         // silently breaks the interpolation rather than erroring.
         const stem = "C:/Users/you/Documents/Resumes/" + (name || "Resume");
         state.savedResumes.push(stem + ".pdf");
-        return { pdf: stem + ".pdf", tex: stem + ".tex" };
+        // linked mirrors the Rust side: true only when the company and
+        // position match a row that is actually in the workbook.
+        const key = (v) => String(v || "").trim().toLowerCase();
+        const row = state.rows.find(
+          (r) => key(r.company) === key(company) && key(r.position) === key(position),
+        );
+        if (row) row.resume = stem + ".pdf";
+        return { pdf: stem + ".pdf", tex: stem + ".tex", linked: Boolean(row) };
       },
       open_saved_resume: ({ path }) => {
         state.openedResumes.push(path);

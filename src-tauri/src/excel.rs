@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 pub const SHEET_NAME: &str = "Applications";
 
-pub const HEADERS: [&str; 12] = [
+pub const HEADERS: [&str; 13] = [
     "Date Applied",
     "Company",
     "Position",
@@ -18,6 +18,11 @@ pub const HEADERS: [&str; 12] = [
     "Job ID",
     "URL",
     "Notes",
+    // Added after the others on purpose: a workbook written by an earlier
+    // version has twelve columns, and reading a missing thirteenth as None
+    // costs nothing, where inserting it anywhere else would shift every
+    // row's meaning.
+    "Resume",
 ];
 
 /// Extra blank rows below existing data that still get the Status
@@ -123,6 +128,7 @@ pub fn read_applications(path: &Path) -> Result<Vec<JobApplication>, String> {
             job_id: cell_to_option(row.get(9)),
             url: cell_to_option(row.get(10)),
             notes: cell_to_option(row.get(11)),
+            resume: cell_to_option(row.get(12)),
         };
         if app.company.is_empty() && app.position.is_empty() {
             continue;
@@ -159,6 +165,7 @@ pub fn export_csv(xlsx_path: &Path, rows: &[JobApplication]) -> Result<PathBuf, 
                 app.job_id.as_deref().unwrap_or(""),
                 app.url.as_deref().unwrap_or(""),
                 app.notes.as_deref().unwrap_or(""),
+                app.resume.as_deref().unwrap_or(""),
             ])
             .map_err(|e| format!("Could not write CSV row: {e}"))?;
     }
@@ -298,6 +305,9 @@ pub fn write_applications(
 
         worksheet
             .write_string_with_format(row, 11, app.notes.as_deref().unwrap_or(""), &base_format())
+            .map_err(|e| e.to_string())?;
+        worksheet
+            .write_string_with_format(row, 12, app.resume.as_deref().unwrap_or(""), &base_format())
             .map_err(|e| e.to_string())?;
     }
 
@@ -450,6 +460,7 @@ mod tests {
             job_id: None,
             url: Some("https://example.com/job/123".to_string()),
             notes: None,
+            resume: None,
         }
     }
 
@@ -459,10 +470,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("roundtrip.xlsx");
 
-        let rows = vec![
+        let mut rows = vec![
             sample_app("Acme", "Engineer", "Applied"),
             sample_app("Globex", "Designer", "Interviewing"),
         ];
+        rows[0].resume = Some("C:/Resumes/Acme-Engineer.pdf".to_string());
         write_applications(&path, &rows, &default_statuses()).expect("write should succeed");
 
         let read_back = read_applications(&path).expect("read should succeed");
@@ -471,6 +483,10 @@ mod tests {
         assert_eq!(read_back[0].position, "Engineer");
         assert_eq!(read_back[1].status, "Interviewing");
         assert_eq!(read_back[0].url.as_deref(), Some("https://example.com/job/123"));
+        // The Resume column was appended after the workbook format was
+        // already in the wild, so its round trip is worth pinning.
+        assert_eq!(read_back[0].resume.as_deref(), Some("C:/Resumes/Acme-Engineer.pdf"));
+        assert_eq!(read_back[1].resume, None);
 
         std::fs::remove_dir_all(&dir).ok();
     }

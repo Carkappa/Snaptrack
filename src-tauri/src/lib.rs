@@ -180,6 +180,8 @@ pub fn run() {
             commands::pick_import_file,
             commands::export_csv,
             commands::get_master_resume,
+            commands::pick_resume_file,
+            commands::import_resume_file,
             commands::set_master_resume,
             commands::tailor_resume,
             commands::save_tailored_resume,

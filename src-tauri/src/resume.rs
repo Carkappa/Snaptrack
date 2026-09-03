@@ -99,6 +99,131 @@ pub fn job_brief(
     brief
 }
 
+/// Pulls the text out of a resume the user already has.
+///
+/// Everyone applying for jobs has a resume as a PDF or a Word file, and
+/// asking them to paste three pages of it into a textarea is the reason
+/// they would not bother. Both formats are readable with crates already
+/// here - lopdf came in with the PDF writer, and a .docx is a zip of XML.
+pub fn import_text(path: &Path) -> Result<String, String> {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+
+    match extension.as_str() {
+        "pdf" => from_pdf(path),
+        "docx" => from_docx(path),
+        // Tidied like the others: a file exported from somewhere else has
+        // the same runs of blank lines, and inconsistency here would show
+        // up as "the import worked differently that time".
+        "txt" | "md" | "markdown" | "text" => std::fs::read_to_string(path)
+            .map(|text| tidy(&text))
+            .map_err(|e| format!("Could not read '{}': {e}", path.display())),
+        other => Err(format!(
+            "Cannot read a '.{other}' file. Use a PDF, a Word .docx, or plain text."
+        )),
+    }
+}
+
+fn from_pdf(path: &Path) -> Result<String, String> {
+    let doc = lopdf::Document::load(path)
+        .map_err(|e| format!("Could not open that PDF: {e}"))?;
+    let pages: Vec<u32> = doc.get_pages().keys().copied().collect();
+    if pages.is_empty() {
+        return Err("That PDF has no pages.".to_string());
+    }
+    let text = doc
+        .extract_text(&pages)
+        .map_err(|e| format!("Could not read text from that PDF: {e}"))?;
+    let cleaned = tidy(&text);
+    if cleaned.trim().is_empty() {
+        return Err(
+            "No text found in that PDF - it may be a scan. Paste the text instead."
+                .to_string(),
+        );
+    }
+    Ok(cleaned)
+}
+
+/// A .docx is a zip; the document body is one XML file inside it.
+fn from_docx(path: &Path) -> Result<String, String> {
+    let file = std::fs::File::open(path)
+        .map_err(|e| format!("Could not open '{}': {e}", path.display()))?;
+    let mut zip = zip::ZipArchive::new(file)
+        .map_err(|e| format!("That .docx could not be opened: {e}"))?;
+    let mut xml = String::new();
+    {
+        use std::io::Read;
+        let mut entry = zip
+            .by_name("word/document.xml")
+            .map_err(|_| "That file is not a Word document.".to_string())?;
+        entry
+            .read_to_string(&mut xml)
+            .map_err(|e| format!("Could not read the document body: {e}"))?;
+    }
+    Ok(tidy(&docx_text(&xml)))
+}
+
+/// Text runs out of WordprocessingML, with paragraphs kept as line breaks.
+///
+/// Deliberately not a full XML parse: only two tags matter, and every
+/// other element in a .docx is formatting this has no use for.
+fn docx_text(xml: &str) -> String {
+    let mut out = String::new();
+    let mut rest = xml;
+
+    while let Some(start) = rest.find('<') {
+        // A paragraph or explicit break ends the line.
+        if rest[start..].starts_with("</w:p>") || rest[start..].starts_with("<w:br") {
+            out.push('\n');
+        }
+        // <w:t> and <w:t xml:space="preserve"> both hold text.
+        if rest[start..].starts_with("<w:t>") || rest[start..].starts_with("<w:t ") {
+            if let Some(open_end) = rest[start..].find('>') {
+                let after = &rest[start + open_end + 1..];
+                if let Some(close) = after.find("</w:t>") {
+                    out.push_str(&unescape_xml(&after[..close]));
+                    rest = &after[close..];
+                    continue;
+                }
+            }
+        }
+        let Some(next) = rest[start + 1..].find('<') else { break };
+        rest = &rest[start + 1 + next..];
+    }
+    out
+}
+
+fn unescape_xml(text: &str) -> String {
+    text.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+}
+
+/// Collapses the runs of blank lines and stray spaces that extraction
+/// leaves behind, so what lands in the box looks like a resume.
+fn tidy(text: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut blanks = 0;
+    for line in text.lines() {
+        let trimmed = line.trim_end().to_string();
+        if trimmed.trim().is_empty() {
+            blanks += 1;
+            if blanks > 1 {
+                continue;
+            }
+        } else {
+            blanks = 0;
+        }
+        lines.push(trimmed);
+    }
+    lines.join("\n").trim().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +286,61 @@ mod tests {
         let path = master_path(Path::new("/docs/JobApplications.xlsx")).unwrap();
         assert!(path.ends_with("Resume_master.md"));
         assert_eq!(path.parent(), Path::new("/docs/JobApplications.xlsx").parent());
+    }
+
+    #[test]
+    fn word_text_runs_become_lines() {
+        let xml = concat!(
+            "<w:document><w:body>",
+            "<w:p><w:r><w:t>Jun Du</w:t></w:r></w:p>",
+            "<w:p><w:r><w:t xml:space=\"preserve\">Software </w:t></w:r>",
+            "<w:r><w:t>Engineer</w:t></w:r></w:p>",
+            "</w:body></w:document>"
+        );
+        let text = docx_text(xml);
+        assert!(text.contains("Jun Du"));
+        assert!(
+            text.contains("Software Engineer"),
+            "runs inside one paragraph join up: {text:?}"
+        );
+        assert!(
+            text.lines().count() >= 2,
+            "paragraphs stay on separate lines: {text:?}"
+        );
+    }
+
+    #[test]
+    fn xml_entities_are_turned_back_into_characters() {
+        let xml = "<w:p><w:r><w:t>R&amp;D &lt;lead&gt;</w:t></w:r></w:p>";
+        assert!(docx_text(xml).contains("R&D <lead>"));
+    }
+
+    #[test]
+    fn formatting_tags_contribute_no_text() {
+        // A real .docx is mostly formatting; none of it belongs in a resume.
+        let xml = "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Name</w:t></w:r></w:p>";
+        assert_eq!(docx_text(xml).trim(), "Name");
+    }
+
+    #[test]
+    fn runs_of_blank_lines_are_collapsed() {
+        // PDF extraction leaves these behind and they make the box look
+        // like the import failed.
+        assert_eq!(tidy("a\n\n\n\nb"), "a\n\nb");
+        assert_eq!(tidy("  \n\na\n  "), "a");
+    }
+
+    #[test]
+    fn an_unreadable_format_says_which_ones_work() {
+        let err = import_text(Path::new("resume.rtf")).unwrap_err();
+        assert!(err.contains("PDF"), "should name what does work: {err}");
+        assert!(err.contains("docx"));
+    }
+
+    #[test]
+    fn a_missing_file_is_reported_not_panicked() {
+        assert!(import_text(Path::new("no-such-resume.pdf")).is_err());
+        assert!(import_text(Path::new("no-such-resume.docx")).is_err());
+        assert!(import_text(Path::new("no-such-resume.txt")).is_err());
     }
 }

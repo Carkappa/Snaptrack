@@ -2443,6 +2443,7 @@ dependencies = [
  "csv",
  "image",
  "keyring",
+ "lopdf",
  "printpdf",
  "regex",
  "reqwest 0.12.28",

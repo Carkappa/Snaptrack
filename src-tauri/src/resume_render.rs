@@ -295,7 +295,7 @@ pub fn to_pdf(resume: &Resume) -> Result<Vec<u8>, String> {
     // wrap on without embedding metrics for a standard font.
     let per_line = |size: f32, width: f32| ((width / (size * 0.3528 * 0.5)) as usize).max(8);
 
-    let mut text = |ops: &mut Vec<Op>, s: &str, size: f32, font: &PdfFontHandle, x: f32, y: f32| {
+    let text = |ops: &mut Vec<Op>, s: &str, size: f32, font: &PdfFontHandle, x: f32, y: f32| {
         if s.trim().is_empty() {
             return;
         }

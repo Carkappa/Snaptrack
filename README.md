@@ -75,12 +75,17 @@ over when one fails — an expired key, a rate limit, no network.
 
 ## Tailoring your resume
 
-Keep your full resume — everything you've done — under **Resume**. Pick a
-saved application or paste a posting, and it writes a shorter one aimed at
-that job, saved beside your workbook as `Resumes/Company-Role.pdf`.
+Keep your full resume — everything you've done — under **Resume**. Paste it
+in, or **Import a file…** to read it out of a PDF, a Word `.docx` or a text
+file. Then pick a saved application or paste a posting, and it writes a
+shorter one aimed at that job, saved beside your workbook as
+`Resumes/Company-Role.pdf`.
 
 You get a **PDF** to send, and a `.tex` beside it if you'd rather typeset it
 yourself. No LaTeX install needed — the PDF is generated directly.
+
+Saving against a saved application records the PDF on that row, so the
+**Resume** column in the list opens what you actually sent.
 
 The model is told to cut and reorder, never to invent. **Read it before you
 send it** — if it claims something you didn't do, that's a bug worth

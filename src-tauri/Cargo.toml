@@ -38,6 +38,10 @@ csv = "1"
 regex = "1"
 url = "2"
 printpdf = { version = "0.11.1", default-features = false }
+# Same version printpdf already pulls in, so the tree carries one copy.
+lopdf = { version = "0.44", default-features = false }
+# A .docx is a zip of XML; this is already used by the tests.
+zip = "2"
 
 # Windows ships an OCR engine. It needs no install, produces no debris
 # from logos, and reads chips Tesseract misses - see DEVELOPING.md for the

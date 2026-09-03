@@ -100,6 +100,7 @@
     ollamaStatus: el("ollama-status"),
     ollamaModelRow: el("ollama-model-row"),
     masterResume: el("master-resume"),
+    masterResumeImport: el("master-resume-import"),
     masterResumeSave: el("master-resume-save"),
     masterResumeMessage: el("master-resume-message"),
     resumeJobPicker: el("resume-job-picker"),
@@ -658,6 +659,10 @@ ${e}`;
       job_id: opt(dom.fJobId.value),
       url: opt(dom.fUrl.value),
       notes: opt(dom.fNotes.value),
+      // Not a form field. An edit rebuilds the whole row, so without this
+      // the tailored resume a row points at is dropped the first time
+      // anyone corrects a typo in it.
+      resume: editingIndex !== null ? allApplications[editingIndex].resume || null : null,
     };
   }
 
@@ -906,6 +911,11 @@ ${e}`;
           <td>${escapeHtml(app.job_id)}</td>
           <td>${url}</td>
           <td>${escapeHtml(app.notes)}</td>
+          <td>${
+            app.resume
+              ? `<a href="#" class="row-resume" data-index="${index}">PDF</a>`
+              : ""
+          }</td>
           <td><button type="button" class="row-delete" data-index="${index}" title="Delete this application" aria-label="Delete ${escapeHtml(app.company)} ${escapeHtml(app.position)}">&times;</button></td>
         </tr>`;
       })
@@ -1006,6 +1016,17 @@ ${e}`;
       );
       if (!ok) return;
       await deleteApplication(index, app);
+      return;
+    }
+    if (e.target.classList.contains("row-resume")) {
+      e.preventDefault();
+      const app = allApplications[Number(e.target.dataset.index)];
+      if (!app || !app.resume) return;
+      try {
+        await invoke("open_saved_resume", { path: app.resume });
+      } catch (err) {
+        dom.listStatus.textContent = String(err);
+      }
       return;
     }
     if (e.target.classList.contains("row-url")) {
@@ -1383,6 +1404,21 @@ ${e}`;
     if (current) dom.resumeJobPicker.value = current;
   }
 
+  dom.masterResumeImport.addEventListener("click", async () => {
+    try {
+      const path = await invoke("pick_resume_file");
+      // Clear first: leaving the last run's "Imported and saved" up after
+      // someone cancels the picker reads as though it imported again.
+      dom.masterResumeMessage.textContent = "";
+      if (!path) return;
+      dom.masterResumeMessage.textContent = "Reading…";
+      dom.masterResume.value = await invoke("import_resume_file", { path });
+      dom.masterResumeMessage.textContent = "Imported and saved - check it read cleanly.";
+    } catch (e) {
+      dom.masterResumeMessage.textContent = String(e);
+    }
+  });
+
   dom.masterResumeSave.addEventListener("click", async () => {
     try {
       const path = await invoke("set_master_resume", { text: dom.masterResume.value });
@@ -1439,7 +1475,12 @@ ${e}`;
         resume: tailoredResume,
       });
       savedResumePath = saved.pdf;
-      dom.resumeSaveMessage.textContent = `Saved ${saved.pdf} and the .tex beside it.`;
+      dom.resumeSaveMessage.textContent = saved.linked
+        ? `Saved ${saved.pdf}, and recorded against that application.`
+        : `Saved ${saved.pdf} and the .tex beside it.`;
+      // The row now carries the resume, so the list has to be re-read
+      // for the link to appear against it.
+      if (saved.linked) await loadApplications();
       dom.resumeOpenFile.hidden = false;
     } catch (e) {
       dom.resumeSaveMessage.textContent = String(e);
