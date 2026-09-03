@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#
+# Runs the guards that CI cannot run for itself.
+#
+# check-workflows.sh is the one that matters here: a workflow file that
+# does not parse cannot report its own breakage, so it is the single
+# failure CI is structurally unable to catch. The other three do run in
+# CI - they are here because catching them now costs seconds and catching
+# them there costs a round trip.
+#
+# Install with ./scripts/install-hooks.sh. Skip once with --no-verify.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+failed=0
+for guard in check-workflows check-commands check-syntax check-mock-shapes; do
+  if ! bash "scripts/$guard.sh"; then
+    failed=1
+  fi
+done
+
+if [ "$failed" -ne 0 ]; then
+  echo
+  echo "Push aborted. Fix the above, or re-run with --no-verify if you"
+  echo "know better than the guard."
+  exit 1
+fi

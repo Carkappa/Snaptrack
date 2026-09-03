@@ -55,7 +55,7 @@ comes back empty.
 
 | | Cost | Notes |
 | --- | --- | --- |
-| **Built-in OCR** (Windows) | free, offline | The engine Windows already ships. Nothing to install. Reads screenshots better than Tesseract in practice - no debris from company logos. |
+| **Built-in OCR** (Windows, macOS) | free, offline | The engine your OS already ships - Windows.Media.Ocr, or Vision on a Mac. Nothing to install. Reads screenshots better than Tesseract in practice - no debris from company logos. |
 | **Tesseract** | free, offline | Reads text but doesn't understand it, so which field is which is guesswork. Needs [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki) on your `PATH`. |
 | **[Ollama](https://ollama.com)** | free, offline | A model on your machine. Pick one from a list with sizes and hardware notes; Settings downloads it. Vision models read the screenshot directly, skipping Tesseract. Unloaded after each capture, so it holds no RAM idle. |
 | **Claude, ChatGPT, Gemini** | API key | Most accurate. Each key stored separately in your OS keychain. |

@@ -53,6 +53,29 @@ jobs:
           name: cargo-lock
           path: src-tauri/Cargo.lock
 
+  # The Linux job above cannot compile the macOS-only OCR engine, and the
+  # release workflow only runs on a tag - so without this a break in
+  # system_ocr/macos_engine.rs would first show up on release day, with
+  # the tag already pushed. A check rather than a build: this is here to
+  # catch code that does not compile, and the release job does the rest.
+  macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --locked
+
   # The frontend has no build step and no npm dependencies, and this keeps it
   # that way: a static server plus the Chrome already on the runner. The test
   # page writes its own verdict into #summary, so `--dump-dom` after the page
@@ -92,7 +115,10 @@ jobs:
           chrome_args="--headless=new --disable-gpu --no-sandbox --virtual-time-budget=10000"
 
           failed=0
-          for page in calendar stats format; do
+          # flows drives the real app.js through the mocked harness, so it
+          # is the only one of these that can catch the frontend calling a
+          # command that does not exist, or a form quietly dropping a field.
+          for page in calendar stats format flows; do
             google-chrome $chrome_args --dump-dom "http://127.0.0.1:8000/tests/$page.test.html" > "$page.html"
             if grep -qE 'All [0-9]+ tests passed' "$page.html"; then
               echo "$page: $(grep -oE 'All [0-9]+ tests passed' "$page.html")"

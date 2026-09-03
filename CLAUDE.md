@@ -41,10 +41,28 @@ python3 -m http.server 8000         # then open the pages below
   `PASS n/n`. **All run in CI** in headless Chrome.
 - `tests/ui-harness.html` — the real `index.html` and `app.js` with
   `window.__TAURI__` mocked. Every tab, form, and flow is clickable without
-  building the app. Drive it from the browser console or a browser tool;
+  building the app. Drive it by hand from the browser console;
   `window.__harness` exposes the fixture rows, recorded calls, failure flags
   (`installUpdateFails`, `openUrlFails`), and `emit()` for Rust-side events.
-  Not automated — it is a manual tool.
+- `tests/flows.test.html` — the same harness, driven by script. **Runs in
+  CI.** `tests/flows/runner.js` boots one harness per suite and exposes the
+  helpers; the suites are one file per area (`resume`, `applications`,
+  `settings`, `capture`). This is the only automated cover `app.js` has,
+  and it is aimed at wiring rather than logic — a command the frontend
+  calls that nobody registered, a form that drops a field it has no input
+  for. Both of those shipped.
+
+Three things about the flow tests that are not obvious:
+
+- **Yield with `MessageChannel`, never `setTimeout`.** A background tab
+  clamps timers to a second, which turns a two-second wait into a
+  six-minute one and looks exactly like a hang. `runner.js` bounds its
+  waits by the clock and yields with a message post.
+- **Tests in a suite share one harness.** Only suites get a fresh one. A
+  test that needs a particular starting state has to set it, not assume it.
+- **The app guards destructive edits with `window.confirm`,** which a
+  headless browser dismisses by default. Use `app.answerConfirms(true)`,
+  or the button reads as doing nothing.
 
 When you touch `calendar.js` or `stats.js`, add to the matching test page
 (and to the `for page in ...` loop in the workflow if you add another). When
@@ -78,7 +96,8 @@ length by growing a paragraph per release.
 
 ## Guards
 
-Three lints run in CI, each for a bug that shipped:
+Four guards, each for a bug that shipped. Three run in CI; the fourth
+cannot, and runs in a git hook instead:
 
 - `check-commands.sh` - a command called from `src/` but missing from
   `generate_handler![]`. Compiles fine both sides, and the harness mocks
@@ -88,11 +107,16 @@ Three lints run in CI, each for a bug that shipped:
   A syntax error in JS; legal in Rust, so it ships.
 - `check-mock-shapes.sh` - harness mocks drifting from the Rust types they
   stand in for.
-- `check-workflows.sh` - workflow YAML that does not parse. Run this one
-  **before pushing**: a broken workflow cannot report its own breakage, so
-  it is the single failure CI structurally cannot catch. Needs `pyyaml`.
+- `check-workflows.sh` - workflow YAML that does not parse. A broken
+  workflow cannot report its own breakage, so it is the single failure CI
+  structurally cannot catch. Needs `pyyaml`.
 
-All three fail when their target is reintroduced; if you change one, check
+Run `./scripts/install-hooks.sh` once per clone: it points `core.hooksPath`
+at `scripts/hooks`, and the `pre-push` hook runs all four. That is what
+makes `check-workflows.sh` actually run, rather than depending on someone
+remembering to.
+
+All four fail when their target is reintroduced; if you change one, check
 that still holds.
 
 ## Building locally
@@ -107,9 +131,14 @@ CI, so let CI cover those rather than chasing it.
 Three, and they all return `Vec<OcrLine>` so the field heuristics,
 click-to-fill and correction-learning work the same behind any of them:
 
-- `system_ocr.rs` - the OS engine. Windows only so far; macOS has an
-  equivalent in Vision and Linux has none, so both fall back. `available()`
-  gates whether the method is offered at all.
+- `system_ocr/` - the OS engine, one file per platform behind a dispatcher.
+  `windows_engine.rs` is Windows.Media.Ocr, `macos_engine.rs` is Vision.
+  Linux has no equivalent and falls back. `available()` gates whether the
+  method is offered at all. Shared work - the median word height, the
+  reading-order sort, the empty-image error - lives in `mod.rs` so the two
+  engines cannot drift on what they return. Vision reports normalised
+  boxes with the origin bottom-left, so `macos_engine.rs` flips and scales
+  them; everything downstream measures from the top in pixels.
 - `local_ocr.rs` - Tesseract, shelled out to, with the preprocessing and
   page-segmentation work in the same file.
 - The cloud and Ollama vision paths, which return fields rather than

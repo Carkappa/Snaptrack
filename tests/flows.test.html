@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- These are dev pages edited constantly; a cached copy reads as a bug
+       in the code you just changed. -->
+  <meta http-equiv="Cache-Control" content="no-store" />
+  <title>App flow tests</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 13px; margin: 16px; }
+    #summary { font-weight: 700; font-size: 15px; margin-bottom: 10px; }
+    #summary.pass { color: #15803d; }
+    #summary.fail { color: #b91c1c; }
+    li { margin-bottom: 2px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    li.fail { color: #b91c1c; }
+    li.pass { color: #15803d; }
+    /* The harness frames are only interesting when something fails, and a
+       row of them above the results pushes the results off screen. */
+    #stage { display: flex; gap: 8px; overflow-x: auto; margin-top: 20px; opacity: 0.5; }
+  </style>
+</head>
+<body>
+  <h1>App flow tests</h1>
+  <p>Drives the real <code>index.html</code> and <code>app.js</code> through
+     <code>tests/ui-harness.html</code>, one fresh harness per suite. These
+     cover the wiring between the frontend and the commands it calls &mdash;
+     the part no pure-function test can reach.</p>
+  <div id="summary">Running&hellip;</div>
+  <ul id="results"></ul>
+  <div id="stage"></div>
+
+  <script src="flows/runner.js"></script>
+  <script src="flows/applications.flows.js"></script>
+  <script src="flows/resume.flows.js"></script>
+  <script src="flows/settings.flows.js"></script>
+  <script src="flows/capture.flows.js"></script>
+  <script>
+    window.JobTrackerFlows.run();
+  </script>
+</body>
+</html>

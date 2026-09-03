@@ -42,8 +42,15 @@ pub fn output_dir(workbook: &Path) -> Option<PathBuf> {
 /// The extension is added by the caller, which writes more than one file.
 ///
 /// Named after the job rather than the date, because the reason to open one
-/// six weeks later is "what did I send Amazon?" - and the same job applied
-/// for twice should not silently overwrite the first attempt.
+/// six weeks later is "what did I send Amazon?", and a date answers a
+/// question nobody asks.
+///
+/// The consequence is that saving twice for one job overwrites: the stem
+/// is company and position, nothing else. That is the behaviour you want
+/// for the common case - tailor, read it, dislike a line, tailor again -
+/// where a `-2` file would just be litter you have to tell apart later.
+/// Applying to the same role at the same company months later does lose
+/// the first PDF, which is the price.
 pub fn output_name(company: &str, position: &str) -> String {
     let clean = |s: &str| {
         let kept: String = s

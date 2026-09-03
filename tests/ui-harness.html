@@ -230,9 +230,34 @@
       get_excel_path: () => "C:\\Users\\you\\Documents\\JobApplications.xlsx",
       list_applications: () => state.rows.map((r) => ({ ...r })),
       export_csv: () => "C:\\Users\\you\\Documents\\JobApplications.csv",
-      save_application: ({ application }) => {
+      save_application: ({ application, force }) => {
+        // Mirrors the Rust command: unless forced, a row whose company and
+        // position already exist comes back as a Duplicate rather than
+        // being written. Without this the harness could not reach the
+        // duplicate banner at all, and the two buttons on it were dead
+        // code as far as any test was concerned.
+        if (!force) {
+          const key = (v) => String(v || "").trim().toLowerCase();
+          const existing = state.rows.find(
+            (r) => key(r.company) === key(application.company) &&
+                   key(r.position) === key(application.position),
+          );
+          if (existing) {
+            return { outcome: "Duplicate", existing_status: existing.status };
+          }
+        }
         state.rows.push({ ...application });
         return { outcome: "Saved" };
+      },
+      update_existing_status: ({ company, position, status }) => {
+        const key = (v) => String(v || "").trim().toLowerCase();
+        const row = state.rows.find(
+          (r) => key(r.company) === key(company) && key(r.position) === key(position),
+        );
+        if (!row) throw new Error("That application is no longer in the workbook.");
+        row.status = status;
+        row.last_updated = new Date().toISOString().slice(0, 10);
+        return null;
       },
       update_status_at_index: ({ index, status }) => {
         state.rows[index].status = status;
