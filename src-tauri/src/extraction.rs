@@ -24,6 +24,11 @@ Rules:
 - Do not hallucinate a company or position name if the image is unclear - use null instead.
 - Output must be a single valid JSON object and nothing else."#;
 
+/// Public so callers that ask for JSON can clean a fenced reply.
+pub fn strip_fences(text: &str) -> String {
+    strip_code_fences(text)
+}
+
 fn strip_code_fences(text: &str) -> String {
     let trimmed = text.trim();
     let without_fence = trimmed
@@ -507,9 +512,21 @@ pub async fn chat_text(
     api_base: &str,
     system: &str,
     user: &str,
+    schema: Option<serde_json::Value>,
 ) -> Result<String, String> {
     let name = provider_display_name(provider);
     let client = reqwest::Client::new();
+
+    // Asked for as a schema where the provider supports one, and as a
+    // plain instruction where it does not - the caller parses either way,
+    // and reports a reply it cannot use rather than pasting prose into a
+    // PDF.
+    let json_note = if schema.is_some() {
+        "\n\nReturn only JSON matching the required shape. No prose, no code fences."
+    } else {
+        ""
+    };
+    let system_text = format!("{system}{json_note}");
 
     let request = match provider {
         "claude" => client
@@ -519,39 +536,59 @@ pub async fn chat_text(
             .json(&serde_json::json!({
                 "model": model,
                 "max_tokens": 4096,
-                "system": system,
+                "system": system_text,
                 "messages": [{ "role": "user", "content": user }]
             })),
-        "gemini" => client
-            .post(format!("{GEMINI_URL_BASE}/{model}:generateContent"))
-            .header("x-goog-api-key", api_key)
-            .json(&serde_json::json!({
-                "systemInstruction": { "parts": [{ "text": system }] },
-                "contents": [{ "role": "user", "parts": [{ "text": user }] }],
-                "generationConfig": { "maxOutputTokens": 4096 }
-            })),
-        "openai" | "tamu" => client
-            .post(format!("{}/chat/completions", api_base.trim_end_matches('/')))
-            .header("authorization", format!("Bearer {api_key}"))
-            .json(&serde_json::json!({
+        "gemini" => {
+            let mut config = serde_json::json!({ "maxOutputTokens": 4096 });
+            if schema.is_some() {
+                config["responseMimeType"] = serde_json::json!("application/json");
+            }
+            client
+                .post(format!("{GEMINI_URL_BASE}/{model}:generateContent"))
+                .header("x-goog-api-key", api_key)
+                .json(&serde_json::json!({
+                    "systemInstruction": { "parts": [{ "text": system_text }] },
+                    "contents": [{ "role": "user", "parts": [{ "text": user }] }],
+                    "generationConfig": config
+                }))
+        }
+        "openai" | "tamu" => {
+            let mut body = serde_json::json!({
                 "model": model,
                 "stream": false,
                 "messages": [
-                    { "role": "system", "content": system },
+                    { "role": "system", "content": system_text },
                     { "role": "user", "content": user }
                 ]
-            })),
-        "ollama" => client
-            .post(format!("{}/api/chat", api_base.trim_end_matches('/')))
-            .json(&serde_json::json!({
+            });
+            // Not a strict schema: a university gateway rejects those, and
+            // a rejected request here means no resume at all.
+            if schema.is_some() {
+                body["response_format"] = serde_json::json!({ "type": "json_object" });
+            }
+            client
+                .post(format!("{}/chat/completions", api_base.trim_end_matches('/')))
+                .header("authorization", format!("Bearer {api_key}"))
+                .json(&body)
+        }
+        "ollama" => {
+            let mut body = serde_json::json!({
                 "model": model,
                 "stream": false,
                 "keep_alive": 0,
                 "messages": [
-                    { "role": "system", "content": system },
+                    { "role": "system", "content": system_text },
                     { "role": "user", "content": user }
                 ]
-            })),
+            });
+            if let Some(schema) = &schema {
+                body["format"] = schema.clone();
+            }
+            client
+                .post(format!("{}/api/chat", api_base.trim_end_matches('/')))
+                .json(&body)
+        }
         other => {
             return Err(format!(
                 "{other} reads screenshots but cannot write. Choose a model-backed method in Settings."

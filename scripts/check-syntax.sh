@@ -28,6 +28,7 @@ ALLOW = (
     re.compile(r'replace\(/"/g'),      # a regex matching a quote
     re.compile(r'": "Backslash"'),     # the key-name map
     re.compile(r'let tsv = "level'),   # a deliberate multi-line TSV fixture
+    re.compile(r"replace\('\"'"),        # escaping a quote for HTML
 )
 
 files = (

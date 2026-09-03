@@ -1334,6 +1334,27 @@ ${e}`;
   // ---------- Resume tab ----------
 
   let savedResumePath = null;
+  // The structured resume behind the preview. Saving renders the PDF and
+  // the .tex from this, not from the text on screen.
+  let tailoredResume = null;
+
+  /// A readable rendering of the structure, for checking before sending.
+  function resumePreview(r) {
+    const lines = [r.name, r.contact, ""];
+    if (r.summary) lines.push(r.summary, "");
+    for (const section of r.sections || []) {
+      lines.push(section.heading.toUpperCase());
+      if (section.items && section.items.length) lines.push(section.items.join(" · "));
+      for (const entry of section.entries || []) {
+        const right = [entry.location, entry.dates].filter(Boolean).join(", ");
+        lines.push(`${entry.title}${right ? "  -  " + right : ""}`);
+        if (entry.organisation) lines.push(`  ${entry.organisation}`);
+        for (const bullet of entry.bullets || []) lines.push(`  • ${bullet}`);
+      }
+      lines.push("");
+    }
+    return lines.join("\n");
+  }
 
   async function loadResumeTab() {
     try {
@@ -1388,14 +1409,14 @@ ${e}`;
     dom.resumeTailor.disabled = true;
     dom.resumeTailorMessage.textContent = "Writing… this takes a few seconds.";
     try {
-      const text = await invoke("tailor_resume", {
+      tailoredResume = await invoke("tailor_resume", {
         company: job ? job.company : "",
         position: job ? job.position : "",
         location: job && job.location ? job.location : "",
         notes: job && job.notes ? job.notes : "",
         pasted,
       });
-      dom.resumeResult.value = text;
+      dom.resumeResult.value = resumePreview(tailoredResume);
       dom.resumeResultGroup.hidden = false;
       dom.resumeTailorMessage.textContent = "Done - read it before you send it.";
       savedResumePath = null;
@@ -1409,14 +1430,16 @@ ${e}`;
   });
 
   dom.resumeSaveFile.addEventListener("click", async () => {
+    if (!tailoredResume) return;
     const job = selectedResumeJob();
     try {
-      savedResumePath = await invoke("save_tailored_resume", {
+      const saved = await invoke("save_tailored_resume", {
         company: job ? job.company : "",
         position: job ? job.position : "",
-        text: dom.resumeResult.value,
+        resume: tailoredResume,
       });
-      dom.resumeSaveMessage.textContent = `Saved to ${savedResumePath}`;
+      savedResumePath = saved.pdf;
+      dom.resumeSaveMessage.textContent = `Saved ${saved.pdf} and the .tex beside it.`;
       dom.resumeOpenFile.hidden = false;
     } catch (e) {
       dom.resumeSaveMessage.textContent = String(e);

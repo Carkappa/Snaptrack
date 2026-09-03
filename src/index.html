@@ -325,10 +325,16 @@
             Read it before you send it. Nothing here should be new - if it
             says something you did not do, delete it and tell me.
           </p>
-          <textarea id="resume-result" rows="14" spellcheck="false"></textarea>
+          <textarea id="resume-result" rows="14" spellcheck="false" readonly></textarea>
+          <p class="hint">
+            Saving writes a <strong>PDF</strong> to send and a
+            <code>.tex</code> alongside it if you'd rather typeset it
+            yourself. To change the wording, edit those - or tailor it
+            again.
+          </p>
           <div class="settings-actions">
-            <button id="resume-save-file" class="btn btn-secondary btn-small">Save as file</button>
-            <button id="resume-open-file" class="btn btn-link btn-small" hidden>Open it</button>
+            <button id="resume-save-file" class="btn btn-primary btn-small">Save PDF</button>
+            <button id="resume-open-file" class="btn btn-link btn-small" hidden>Open the PDF</button>
             <span id="resume-save-message" class="hint"></span>
           </div>
         </div>

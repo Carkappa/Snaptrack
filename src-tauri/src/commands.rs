@@ -1924,7 +1924,7 @@ pub async fn tailor_resume<R: tauri::Runtime>(
     location: String,
     notes: String,
     pasted: String,
-) -> Result<String, String> {
+) -> Result<crate::resume_render::Resume, String> {
     let master = get_master_resume(app.clone())?;
     if master.trim().is_empty() {
         return Err("Save your full resume first - there is nothing to tailor.".to_string());
@@ -1956,15 +1956,21 @@ pub async fn tailor_resume<R: tauri::Runtime>(
         "Here is the job posting:\n\n{brief}\n\n---\n\nHere is the full resume to tailor:\n\n{master}"
     );
 
-    extraction::chat_text(
+    let raw = extraction::chat_text(
         &provider.id,
         &model,
         &api_key,
         &api_base,
         crate::resume::SYSTEM_PROMPT,
         &user,
+        Some(crate::resume_render::schema()),
     )
-    .await
+    .await?;
+
+    // A model that ignored the schema and answered in prose is a failure
+    // worth naming, not something to paste into a PDF as-is.
+    serde_json::from_str::<crate::resume_render::Resume>(&extraction::strip_fences(&raw))
+        .map_err(|e| format!("{} did not return a resume it could use: {e}", provider.label))
 }
 
 /// Writes a tailored resume into a Resumes folder beside the workbook,
@@ -1974,21 +1980,37 @@ pub fn save_tailored_resume<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     company: String,
     position: String,
-    text: String,
-) -> Result<String, String> {
-    if text.trim().is_empty() {
-        return Err("There is nothing to save yet.".to_string());
-    }
+    resume: crate::resume_render::Resume,
+) -> Result<SavedResume, String> {
     let workbook = resolve_excel_path(&app)?;
     let dir = crate::resume::output_dir(&workbook)
         .ok_or_else(|| "The workbook has no folder to save alongside.".to_string())?;
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Could not create '{}': {e}", dir.display()))?;
 
-    let path = dir.join(crate::resume::output_name(&company, &position));
-    std::fs::write(&path, text)
-        .map_err(|e| format!("Could not save '{}': {e}", path.display()))?;
-    Ok(path.to_string_lossy().to_string())
+    let stem = crate::resume::output_name(&company, &position);
+
+    // The PDF is what gets attached; the .tex is there for anyone who
+    // wants to typeset it themselves.
+    let pdf_path = dir.join(format!("{stem}.pdf"));
+    let pdf = crate::resume_render::to_pdf(&resume)?;
+    std::fs::write(&pdf_path, pdf)
+        .map_err(|e| format!("Could not save '{}': {e}", pdf_path.display()))?;
+
+    let tex_path = dir.join(format!("{stem}.tex"));
+    std::fs::write(&tex_path, crate::resume_render::to_latex(&resume))
+        .map_err(|e| format!("Could not save '{}': {e}", tex_path.display()))?;
+
+    Ok(SavedResume {
+        pdf: pdf_path.to_string_lossy().to_string(),
+        tex: tex_path.to_string_lossy().to_string(),
+    })
+}
+
+#[derive(serde::Serialize)]
+pub struct SavedResume {
+    pub pdf: String,
+    pub tex: String,
 }
 
 /// Opens a saved resume in whatever the system uses for Markdown.

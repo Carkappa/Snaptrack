@@ -23,7 +23,7 @@ Absolute rules, in order of importance:
 
 Aim for one page of content unless the master resume is clearly for a senior role that needs two.
 
-Return only the tailored resume as plain Markdown - no preamble, no explanation, no commentary about what you changed."#;
+Return the tailored resume as JSON matching the schema you were given. Bullets are single sentences without a leading dash. Put skills and similar lists in a section's "items"; put jobs, degrees and projects in its "entries"."#;
 
 /// Where the master resume lives: beside the workbook, so it moves with it
 /// and is as easy to open, edit and back up as the spreadsheet is.
@@ -38,7 +38,8 @@ pub fn output_dir(workbook: &Path) -> Option<PathBuf> {
     Some(parent.join("Resumes"))
 }
 
-/// Filename for a tailored resume, from the role it was aimed at.
+/// Filename stem for a tailored resume, from the role it was aimed at.
+/// The extension is added by the caller, which writes more than one file.
 ///
 /// Named after the job rather than the date, because the reason to open one
 /// six weeks later is "what did I send Amazon?" - and the same job applied
@@ -65,7 +66,7 @@ pub fn output_name(company: &str, position: &str) -> String {
     // Long titles are common and a 300-character filename is its own
     // problem on Windows.
     let trimmed: String = stem.chars().take(80).collect();
-    format!("{}.md", trimmed.trim_matches('-'))
+    trimmed.trim_matches('-').to_string()
 }
 
 /// The prompt describing one posting, from whatever is known about it.
@@ -106,16 +107,16 @@ mod tests {
     fn the_filename_says_which_job_it_was_for() {
         assert_eq!(
             output_name("Amazon", "Robotics - Software Development Engineer"),
-            "Amazon-Robotics-Software-Development-Engineer.md"
+            "Amazon-Robotics-Software-Development-Engineer"
         );
-        assert_eq!(output_name("AtriCure, Inc.", "IT Co-op"), "AtriCure-Inc-IT-Co-op.md");
+        assert_eq!(output_name("AtriCure, Inc.", "IT Co-op"), "AtriCure-Inc-IT-Co-op");
     }
 
     #[test]
     fn characters_a_filesystem_refuses_are_removed() {
         let name = output_name("A/B\\C:D*E?F", "Engineer <Senior>");
         assert!(!name.contains(['/', '\\', ':', '*', '?', '<', '>']));
-        assert!(name.ends_with(".md"));
+        assert!(!name.is_empty());
     }
 
     #[test]
@@ -126,9 +127,9 @@ mod tests {
 
     #[test]
     fn a_nameless_row_still_gets_a_filename() {
-        assert_eq!(output_name("", ""), "Resume.md");
-        assert_eq!(output_name("", "Engineer"), "Engineer.md");
-        assert_eq!(output_name("Acme", ""), "Acme.md");
+        assert_eq!(output_name("", ""), "Resume");
+        assert_eq!(output_name("", "Engineer"), "Engineer");
+        assert_eq!(output_name("Acme", ""), "Acme");
     }
 
     #[test]

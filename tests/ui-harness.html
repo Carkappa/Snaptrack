@@ -384,12 +384,30 @@
           throw new Error("Save your full resume first - there is nothing to tailor.");
         }
         state.tailorCalls.push({ company, position, pasted });
-        return `# Tailored for ${company || "a pasted posting"}
-
-Shortened from the master resume.`;
+        // Shaped like resume_render::Resume.
+        return {
+          name: "Jun Du",
+          contact: "jun@example.com",
+          summary: `Tailored for ${company || "a pasted posting"}.`,
+          sections: [
+            {
+              heading: "Experience",
+              items: [],
+              entries: [
+                {
+                  title: "Software Engineer",
+                  organisation: "Acme",
+                  dates: "2024 - 2026",
+                  location: "Remote",
+                  bullets: ["Built a job tracker"],
+                },
+              ],
+            },
+          ],
+        };
       },
-      save_tailored_resume: ({ company, position, text }) => {
-        if (!text.trim()) throw new Error("There is nothing to save yet.");
+      save_tailored_resume: ({ company, position, resume }) => {
+        if (!resume) throw new Error("There is nothing to save yet.");
         const name = [company, position]
           .filter(Boolean)
           .join("-")
@@ -398,9 +416,9 @@ Shortened from the master resume.`;
         // Forward slashes on purpose: a Windows path in a template
         // literal needs doubled backslashes, and getting that wrong here
         // silently breaks the interpolation rather than erroring.
-        const path = "C:/Users/you/Documents/Resumes/" + (name || "Resume") + ".md";
-        state.savedResumes.push(path);
-        return path;
+        const stem = "C:/Users/you/Documents/Resumes/" + (name || "Resume");
+        state.savedResumes.push(stem + ".pdf");
+        return { pdf: stem + ".pdf", tex: stem + ".tex" };
       },
       open_saved_resume: ({ path }) => {
         state.openedResumes.push(path);

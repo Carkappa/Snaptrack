@@ -37,6 +37,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 csv = "1"
 regex = "1"
 url = "2"
+printpdf = { version = "0.11.1", default-features = false }
 
 # Windows ships an OCR engine. It needs no install, produces no debris
 # from logos, and reads chips Tesseract misses - see DEVELOPING.md for the

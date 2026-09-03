@@ -4,6 +4,7 @@ mod extraction;
 mod keychain;
 mod local_ocr;
 pub mod resume;
+pub mod resume_render;
 pub mod system_ocr;
 pub mod models;
 pub mod updates;
