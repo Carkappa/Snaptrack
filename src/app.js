@@ -1514,7 +1514,7 @@ ${e}`;
       const available = await invoke("system_ocr_available");
       dom.extractionMethodStatus.textContent = available
         ? "Uses the OCR engine already built into this machine. Nothing to install, nothing leaves your computer."
-        : "This machine has no built-in OCR engine - it needs Windows 10 or later. Pick another method below.";
+        : "This machine has no built-in OCR engine - it needs Windows 10 or later, or macOS 10.15 or later. Pick another method below.";
     } else if (provider.id === "tesseract") {
       const available = await invoke("local_ocr_available");
       dom.extractionMethodStatus.textContent = available
@@ -1522,7 +1522,7 @@ ${e}`;
         : "Tesseract not found. Install it with `brew install tesseract` (macOS), your package manager (Linux), or from github.com/UB-Mannheim/tesseract/wiki (Windows) - or pick one of the cloud methods below.";
     } else if (provider.id === "ollama") {
       dom.extractionMethodStatus.textContent =
-        "Tesseract reads the screenshot, then a model on this machine pulls the fields out of the text. No key, nothing leaves your machine.";
+        "This machine's OCR engine reads the screenshot, then a model on this machine pulls the fields out of the text. No key, nothing leaves your machine.";
     } else {
       dom.extractionMethodStatus.textContent = `Sends the screenshot to ${provider.label} for higher-accuracy extraction. Needs an API key, below.`;
     }

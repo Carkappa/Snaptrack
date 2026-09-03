@@ -45,10 +45,10 @@ tests/                  Browser-run frontend tests (no npm, no runner)
   with the "Desktop development with C++" workload, and
   [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
   (preinstalled on Windows 11 and most Windows 10 machines)
-- **Tesseract** (optional, but it's the default extraction method — see
-  above for install commands). The app builds and runs fine without it;
-  screenshot extraction just falls back to telling you it's missing
-  until you install it or switch to Claude in Settings.
+- **Tesseract** (optional). Windows and macOS default to the OCR engine
+  the OS already ships, so you only need Tesseract to work on that code
+  path, or on Linux. Without it the app builds and runs fine; the
+  Tesseract method just reports that it is missing.
 
 There is no Node.js/npm dependency — the frontend is plain files served
 directly from `src/`, so there's no `npm install` step at all.

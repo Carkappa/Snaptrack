@@ -9,7 +9,23 @@ use tauri_plugin_store::StoreExt;
 const STORE_FILE: &str = "settings.json";
 const EXCEL_PATH_KEY: &str = "excel_path";
 const EXTRACTION_METHOD_KEY: &str = "extraction_method";
-const DEFAULT_EXTRACTION_METHOD: &str = crate::models::DEFAULT_PROVIDER;
+/// The method a machine with nothing stored should use.
+///
+/// The OS engine where there is one, because it needs no install and no
+/// key - which was the whole reason for adding it. Defaulting to Tesseract
+/// instead meant a new user's first capture failed with "Tesseract not
+/// found" while a perfectly good engine sat unused in their operating
+/// system. Only machines without one (Linux) still start on Tesseract.
+///
+/// Anyone who has picked a method has it stored, so this changes nothing
+/// for them.
+fn default_extraction_method() -> String {
+    if crate::system_ocr::available() {
+        "system".to_string()
+    } else {
+        crate::models::DEFAULT_PROVIDER.to_string()
+    }
+}
 const HOTKEY_KEY: &str = "capture_hotkey";
 const SEEN_WELCOME_KEY: &str = "seen_welcome";
 const STATUS_DEFS_KEY: &str = "status_defs";
@@ -225,7 +241,7 @@ pub fn get_extraction_method<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Res
     Ok(store
         .get(EXTRACTION_METHOD_KEY)
         .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| DEFAULT_EXTRACTION_METHOD.to_string()))
+        .unwrap_or_else(default_extraction_method))
 }
 
 #[tauri::command]
@@ -542,8 +558,28 @@ pub async fn pull_ollama_model<R: tauri::Runtime>(
     Ok(())
 }
 
-/// Reads the screenshot with Tesseract, then has a local model pick the
-/// fields out of the text.
+/// OCR for the paths that only want text, whichever engine provides it.
+///
+/// The OS engine first because it needs no install - the Ollama method
+/// used to demand a Tesseract install on machines that already had a
+/// working engine the rest of the app was using. Tesseract stays as the
+/// fallback, and its error is the one reported when neither works, since
+/// on a machine with no OS engine that is the one the user can fix.
+async fn read_with_best_engine(bytes: &[u8]) -> Result<Vec<crate::local_ocr::OcrLine>, String> {
+    if crate::system_ocr::available() {
+        match crate::system_ocr::run(bytes).await {
+            Ok(lines) => return Ok(lines),
+            // Falling through rather than failing: an engine that is
+            // present can still refuse a particular image, and Tesseract
+            // may well read it.
+            Err(_) => {}
+        }
+    }
+    crate::local_ocr::run_ocr(bytes)
+}
+
+/// Reads the screenshot with whichever OCR engine this machine has, then
+/// has a local model pick the fields out of the text.
 ///
 /// Returns the OCR blocks like the plain Tesseract path does, so
 /// click-to-fill and learning from corrections work here too - the text was
@@ -582,7 +618,7 @@ pub async fn extract_with_ollama<R: tauri::Runtime>(
         .decode(image_base64)
         .map_err(|e| format!("Invalid image data: {e}"))?;
 
-    let lines = crate::local_ocr::run_ocr(&bytes)?;
+    let lines = read_with_best_engine(&bytes).await?;
     if lines.is_empty() {
         return Ok(LocalOcrResult {
             result: ExtractionResult::ParseFailed {
@@ -1521,6 +1557,22 @@ pub fn open_url<R: tauri::Runtime>(app: tauri::AppHandle<R>, url: String) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_first_run_default_is_an_engine_this_machine_can_actually_run() {
+        let method = default_extraction_method();
+        assert_eq!(
+            method == "system",
+            crate::system_ocr::available(),
+            "a machine with an OS engine should start on it, one without should not"
+        );
+        // Whatever it picks has to be a real provider, or the Settings
+        // dropdown opens with nothing selected.
+        assert_eq!(crate::models::provider_or_default(&method).id, method);
+        // And it must never be one that asks for a key before the user has
+        // been anywhere near Settings.
+        assert!(!crate::models::provider_or_default(&method).needs_key);
+    }
 
     #[test]
     fn accepts_the_urls_a_job_posting_actually_has() {
