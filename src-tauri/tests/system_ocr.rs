@@ -50,6 +50,27 @@ async fn the_system_engine_reads_a_real_screenshot() {
         blocks.windows(2).all(|w| w[0].top <= w[1].top),
         "blocks must be ordered top to bottom"
     );
+
+    // The card reads: company, then the job title, then the metadata line.
+    // Asserting on that order rather than on `top` being sorted, because
+    // the sort happens either way - it is the only thing here that catches
+    // a `top` measured from the wrong edge. macOS matters for this: Vision
+    // reports its boxes with the origin at the bottom left, and an
+    // un-flipped read would hand back a perfectly sorted card upside down,
+    // leaving the field heuristics to call the last line the job title.
+    let first_containing = |needle: &str| {
+        blocks
+            .iter()
+            .position(|b| b.text.to_lowercase().contains(needle))
+    };
+    let company = first_containing("atricure").expect("the company line");
+    let title = first_containing("co-op").expect("the title line");
+    let footer = first_containing("promoted").expect("the metadata line");
+    assert!(
+        company < title && title < footer,
+        "the card must come back the way it is laid out, got: {:?}",
+        blocks.iter().map(|b| &b.text).collect::<Vec<_>>()
+    );
     assert!(
         blocks.iter().any(|b| b.height > 0.0),
         "at least one block must carry a real text height"
