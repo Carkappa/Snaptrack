@@ -55,47 +55,44 @@ pub fn recognise(image_bytes: &[u8]) -> Result<Vec<OcrLine>, String> {
     let data = NSData::with_bytes(image_bytes);
     let options: Retained<NSDictionary<VNImageOption, objc2::runtime::AnyObject>> =
         NSDictionary::new();
-    let handler = unsafe {
-        VNImageRequestHandler::initWithData_options(
-            VNImageRequestHandler::alloc(),
-            &data,
-            &options,
-        )
-    };
+    let handler = VNImageRequestHandler::initWithData_options(
+        VNImageRequestHandler::alloc(),
+        &data,
+        &options,
+    );
 
-    let request = unsafe { VNRecognizeTextRequest::new() };
+    let request = VNRecognizeTextRequest::new();
     // Accurate over Fast: this runs once, on a screenshot the user is
     // waiting on, and the whole point of the feature is not retyping.
-    unsafe {
-        request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
-        request.setUsesLanguageCorrection(true);
-    }
+    request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
+    request.setUsesLanguageCorrection(true);
 
     // Two hops, not one: the chain is VNRecognizeTextRequest ->
     // VNImageBasedRequest -> VNRequest, and performRequests wants the base.
     let base: Retained<VNRequest> =
         Retained::into_super(Retained::into_super(request.clone()));
     let requests: Retained<NSArray<VNRequest>> = NSArray::from_retained_slice(&[base]);
-    unsafe {
-        handler
-            .performRequests_error(&requests)
-            .map_err(|e| format!("macOS OCR failed: {e}"))?;
-    }
+    handler
+        .performRequests_error(&requests)
+        .map_err(|e| format!("macOS OCR failed: {e}"))?;
 
-    let observations = unsafe { request.results() }
+    let observations = request
+        .results()
         .ok_or_else(|| "No text was found in that image.".to_string())?;
 
     let mut blocks = Vec::new();
     for observation in observations.iter() {
-        let candidates = unsafe { observation.topCandidates(1) };
+        let candidates = observation.topCandidates(1);
         let Some(best) = candidates.iter().next() else {
             continue;
         };
-        let text = unsafe { best.string() }.to_string();
+        let text = best.string().to_string();
         if text.trim().is_empty() {
             continue;
         }
 
+        // The one call here that really is unsafe: it reads a CGRect out
+        // of the observation with no checking on the Rust side.
         let box_ = unsafe { observation.boundingBox() };
         // Normalised, origin bottom-left. The distance from the top of the
         // image to the top of this line is what everything downstream sorts
