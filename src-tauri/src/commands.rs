@@ -2244,6 +2244,38 @@ async fn typeset_with_template<R: tauri::Runtime>(
     }
 }
 
+/// Compiles the styled .tex, or explains in `note` why it could not.
+///
+/// Never fatal. Every path out of here that fails leaves `note` saying so
+/// and lets the caller fall back to the built-in PDF, because a resume in
+/// the wrong style is worth more than an error message.
+fn compile_styled_pdf<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    tex: &str,
+    note: &mut String,
+) -> Option<Vec<u8>> {
+    let template = stored_template(app)?;
+    let Some(engine) = crate::latex_build::find_engine(&template.preamble) else {
+        *note = "The .tex is in your style. The PDF is not, because no LaTeX engine was found - install TeX Live, MacTeX or Tectonic and it will be.".to_string();
+        return None;
+    };
+
+    // Beside the author's own resume.tex, so a template that inputs a file
+    // or includes a photograph still finds it.
+    let resources = template_file(app).ok();
+    let resources = resources.as_deref().and_then(|p| p.parent());
+
+    match crate::latex_build::compile(tex, engine, resources) {
+        Ok(pdf) => Some(pdf),
+        Err(why) => {
+            *note = format!(
+                "The .tex is in your style; the PDF is not, because {engine} could not build it: {why}"
+            );
+            None
+        }
+    }
+}
+
 /// Writes a tailored resume into a Resumes folder beside the workbook,
 /// named after the job it was written for.
 #[tauri::command]
@@ -2261,25 +2293,36 @@ pub async fn save_tailored_resume<R: tauri::Runtime>(
 
     let stem = crate::resume::output_name(&company, &position);
 
-    // The PDF is what gets attached; the .tex is there for anyone who
-    // wants to typeset it themselves.
-    let pdf_path = dir.join(format!("{stem}.pdf"));
-    let pdf = crate::resume_render::to_pdf(&resume)?;
-    std::fs::write(&pdf_path, pdf)
-        .map_err(|e| format!("Could not save '{}': {e}", pdf_path.display()))?;
-
     // Where the user has their own LaTeX resume, the .tex is written in
     // *their* document - same class, same packages, same macros - with only
     // the words replaced. Falling back to the built-in style is always
     // allowed, and always says why.
-    let (tex, note) = match typeset_with_template(&app, &resume).await {
-        Some((tex, note)) if !tex.is_empty() => (tex, note),
-        Some((_, note)) => (crate::resume_render::to_latex(&resume), note),
-        None => (crate::resume_render::to_latex(&resume), String::new()),
+    let (tex, mut note, styled) = match typeset_with_template(&app, &resume).await {
+        Some((tex, note)) if !tex.is_empty() => (tex, note, true),
+        Some((_, note)) => (crate::resume_render::to_latex(&resume), note, false),
+        None => (crate::resume_render::to_latex(&resume), String::new(), false),
     };
     let tex_path = dir.join(format!("{stem}.tex"));
-    std::fs::write(&tex_path, tex)
+    std::fs::write(&tex_path, &tex)
         .map_err(|e| format!("Could not save '{}': {e}", tex_path.display()))?;
+
+    // The PDF is the file that gets attached to the row and actually sent,
+    // so when the .tex is in the author's own style the PDF has to be too -
+    // otherwise the styled file is the one nobody looks at. Compiling needs
+    // a TeX distribution, which is a fair assumption for someone who keeps
+    // their resume in LaTeX and no assumption at all for anyone else.
+    let pdf_path = dir.join(format!("{stem}.pdf"));
+    let compiled = if styled {
+        compile_styled_pdf(&app, &tex, &mut note)
+    } else {
+        None
+    };
+    let pdf = match compiled {
+        Some(bytes) => bytes,
+        None => crate::resume_render::to_pdf(&resume)?,
+    };
+    std::fs::write(&pdf_path, pdf)
+        .map_err(|e| format!("Could not save '{}': {e}", pdf_path.display()))?;
 
     // Record it against the application, so the row answers "what did I
     // send them?" the way it already answers "what did the posting say?".

@@ -39,6 +39,15 @@ jobs:
       # lines when something does break.
       # --locked fails rather than silently rewriting Cargo.lock, so the
       # committed lock cannot drift out of date again without CI saying so.
+      # tests/latex_build.rs compiles a real document with a real engine
+      # and skips when there is none, so without this the whole compile
+      # path is covered only by unit tests of its string handling - the
+      # part least likely to be wrong. -no-install-recommends keeps this to
+      # the base formats rather than pulling all of TeX Live.
+      - name: Install a minimal TeX
+        run: |
+          sudo apt-get install -y --no-install-recommends             texlive-latex-base texlive-latex-recommended
+
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --locked

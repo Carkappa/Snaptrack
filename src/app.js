@@ -117,6 +117,7 @@
     resumeRevert: el("resume-revert"),
     resumeSaveFile: el("resume-save-file"),
     resumeOpenFile: el("resume-open-file"),
+    resumeOpenTex: el("resume-open-tex"),
     resumeSaveMessage: el("resume-save-message"),
     providerCards: el("provider-cards"),
     settingsOllamaModel: el("settings-ollama-model"),
@@ -1361,6 +1362,7 @@ ${e}`;
   // ---------- Resume tab ----------
 
   let savedResumePath = null;
+  let savedTexPath = null;
   // The structured resume behind the preview. Saving renders the PDF and
   // the .tex from this, not from the text on screen.
   let tailoredResume = null;
@@ -1627,7 +1629,9 @@ ${e}`;
       dom.resumeRevert.hidden = true;
       dom.resumeTailorMessage.textContent = "Done - read it before you send it.";
       savedResumePath = null;
+      savedTexPath = null;
       dom.resumeOpenFile.hidden = true;
+      dom.resumeOpenTex.hidden = true;
       dom.resumeSaveMessage.textContent = "";
     } catch (e) {
       dom.resumeTailorMessage.textContent = String(e);
@@ -1639,6 +1643,12 @@ ${e}`;
   dom.resumeSaveFile.addEventListener("click", async () => {
     if (!tailoredResume) return;
     const job = selectedResumeJob();
+    // Saving is slow when a LaTeX style is in use - a model call to typeset
+    // it, then a TeX run - and an unguarded button meant an impatient
+    // second click bought a second model call and a second rewrite of the
+    // whole workbook.
+    dom.resumeSaveFile.disabled = true;
+    dom.resumeSaveMessage.textContent = "Saving…";
     try {
       const saved = await invoke("save_tailored_resume", {
         company: job ? job.company : "",
@@ -1648,6 +1658,7 @@ ${e}`;
         resume: collectResumeFromSheet(),
       });
       savedResumePath = saved.pdf;
+      savedTexPath = saved.tex;
       const where = saved.linked
         ? `Saved ${saved.pdf}, and recorded against that application.`
         : `Saved ${saved.pdf} and the .tex beside it.`;
@@ -1658,8 +1669,11 @@ ${e}`;
       // for the link to appear against it.
       if (saved.linked) await loadApplications();
       dom.resumeOpenFile.hidden = false;
+      dom.resumeOpenTex.hidden = !saved.tex;
     } catch (e) {
       dom.resumeSaveMessage.textContent = String(e);
+    } finally {
+      dom.resumeSaveFile.disabled = false;
     }
   });
 
@@ -1688,6 +1702,17 @@ ${e}`;
     renderResumeSheet(tailoredResume);
     dom.resumeRevert.hidden = true;
     dom.resumeSaveMessage.textContent = "Back to what the model wrote.";
+  });
+
+  // The .tex is the styled artifact when a template is in use, and until
+  // now the app wrote it and gave you no way to reach it.
+  dom.resumeOpenTex.addEventListener("click", async () => {
+    if (!savedTexPath) return;
+    try {
+      await invoke("open_saved_resume", { path: savedTexPath });
+    } catch (e) {
+      dom.resumeSaveMessage.textContent = String(e);
+    }
   });
 
   dom.resumeOpenFile.addEventListener("click", async () => {

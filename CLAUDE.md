@@ -174,8 +174,19 @@ did not define. A body that fails is refused and the caller falls back to
 the built-in template *with a reason*, because a `.tex` in the wrong style
 is a far better outcome than one that will not compile.
 
+`latex_build.rs` then compiles that `.tex`, because the PDF is the file
+that gets attached to the row and sent - a styled `.tex` next to an
+unstyled PDF means the styled one is the file nobody opens. The engine is
+chosen by the preamble: `fontspec` and its relatives rule out pdflatex
+outright. Every failure here is soft and lands in `SavedResume::note`,
+which is the only reason a missing TeX distribution is not a broken
+feature.
+
 `tests/latex_template.rs` runs the whole path against a Jake's-Resume-shaped
-document, which is the shape most real ones have. Test against that rather
+document, which is the shape most real ones have. `tests/latex_build.rs`
+compiles a real document with a real engine and skips where there is none,
+so the `rust` job installs `texlive-latex-base` to make it run somewhere -
+the same reason the `macos` job exists. Test against that rather
 than the toy in the module's own tests when changing the validator: it is
 easy to write one that only accepts documents as simple as the fixture.
 

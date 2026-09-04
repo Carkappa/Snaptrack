@@ -84,12 +84,17 @@ document class, same packages, same macros, only the words changed. Your
 preamble is copied through untouched, so nothing can drift; the body is
 rewritten using the commands your document already uses, and checked before
 it's written. If it can't be done cleanly you get the built-in style and a
-line saying why, never a file that won't compile. Then pick a saved application or paste a posting, and it writes a
-shorter one aimed at that job, saved beside your workbook as
-`Resumes/Company-Role.pdf`.
+line saying why, never a file that won't compile.
 
-You get a **PDF** to send, and a `.tex` beside it if you'd rather typeset it
-yourself. No LaTeX install needed — the PDF is generated directly.
+Then pick a saved application or paste a posting, and it writes a shorter
+one aimed at that job, saved beside your workbook as
+`Resumes/Company-Role.pdf` with the `.tex` next to it. Both are openable
+from the app.
+
+**The PDF is in your style too** where you have a TeX distribution — it's
+built with `pdflatex`, `xelatex`, `lualatex` or Tectonic, whichever is
+installed and suits your preamble. Without one, the PDF comes from the
+built-in writer and the app says so; no LaTeX install is ever required.
 
 The tailored version is shown as the page it will become, and every line
 of it is editable - click and type, or press the &times; to cut a line.

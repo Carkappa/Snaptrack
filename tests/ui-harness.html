@@ -72,6 +72,9 @@
       installUpdateCalls: 0,
       installUpdateFails: false,
       pickResumeCancels: false,
+      holdSave: false,
+      releaseSave: null,
+      latexEngine: false,
       pickResumeLatex: false,
       importResumeFails: false,
       resumeTemplate: null,
@@ -491,7 +494,27 @@
           ? "Your LaTeX style was not used because the body calls a macro your document does not define. The built-in style was."
           : "";
         state.savedWithTemplate = Boolean(state.resumeTemplate) && !state.templateTypesetFails;
-        return { pdf: stem + ".pdf", tex: stem + ".tex", linked: Boolean(row), note };
+        // The Rust side compiles the styled .tex when a TeX engine is
+        // present, and says so plainly when there is none - the PDF is the
+        // file that gets sent, so which style it is in matters.
+        const styled = state.savedWithTemplate;
+        const result = {
+          pdf: stem + ".pdf",
+          tex: stem + ".tex",
+          linked: Boolean(row),
+          note: styled && !state.latexEngine
+            ? "The .tex is in your style. The PDF is not, because no LaTeX engine was found - install TeX Live, MacTeX or Tectonic and it will be."
+            : note,
+        };
+        // Saving is genuinely slow once a model call and a TeX run are in
+        // it. Holding the promise lets a test see the in-flight state
+        // rather than guessing that it existed.
+        if (state.holdSave) {
+          return new Promise((resolve) => {
+            state.releaseSave = () => resolve(result);
+          });
+        }
+        return result;
       },
       open_saved_resume: ({ path }) => {
         state.openedResumes.push(path);

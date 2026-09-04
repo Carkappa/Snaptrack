@@ -2,6 +2,7 @@ pub mod commands;
 mod excel;
 mod extraction;
 mod keychain;
+pub mod latex_build;
 pub mod latex_template;
 mod local_ocr;
 pub mod resume;

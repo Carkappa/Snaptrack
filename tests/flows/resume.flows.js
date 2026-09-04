@@ -228,6 +228,92 @@
       app.harness.templateTypesetFails = false;
     });
 
+    test("a slow save cannot be started twice by clicking again", async (app) => {
+      // Saving became slow when the LaTeX style went in: a model call to
+      // typeset it, then a TeX run. Unguarded, a second click bought a
+      // second model call and a second rewrite of the whole workbook.
+      await app.tab("resume");
+      await app.click("#master-resume-import");
+      await app.choose("resume-job-picker", "");
+      await app.type("resume-job-text", "Acme Rockets, Propulsion Engineer.");
+      await app.click("#resume-tailor");
+
+      const before = app.calls("save_tailored_resume").length;
+      app.harness.holdSave = true;
+      const button = app.byId("resume-save-file");
+
+      // Not awaited: the point is to look at the app while it is working.
+      button.click();
+      await app.waitFor(() => app.harness.releaseSave, "the save to be in flight");
+
+      ok(button.disabled, "the button is disabled while the save runs");
+      contains(app.text("#resume-save-message"), "Saving", "it says what it is doing");
+
+      button.click();
+      button.click();
+      eq(app.calls("save_tailored_resume").length, before + 1,
+         "three clicks, one save");
+
+      app.harness.releaseSave();
+      app.harness.holdSave = false;
+      await app.waitFor(() => !button.disabled, "the button to come back");
+      contains(app.text("#resume-save-message"), "Saved", "and it reports the result");
+    });
+
+    test("the .tex can be opened, not just written", async (app) => {
+      // The styled file is the whole point of a LaTeX template, and the
+      // app used to write it and give you no way to reach it.
+      await app.tab("resume");
+      await app.click("#master-resume-import");
+      await app.choose("resume-job-picker", "");
+      await app.type("resume-job-text", "Acme Rockets, Propulsion Engineer.");
+      await app.click("#resume-tailor");
+
+      ok(app.byId("resume-open-tex").hidden, "nothing to open before a save");
+      await app.click("#resume-save-file");
+      ok(!app.byId("resume-open-tex").hidden, "the .tex is offered once written");
+
+      await app.click("#resume-open-tex");
+      const opened = app.harness.openedResumes;
+      const last = opened[opened.length - 1];
+      ok(last.endsWith(".tex"), "it opened the .tex, not the PDF: " + last);
+    });
+
+    test("tailoring again clears the buttons for the file it replaced",
+      async (app) => {
+        await app.tab("resume");
+        await app.click("#master-resume-import");
+        await app.choose("resume-job-picker", "");
+        await app.type("resume-job-text", "Acme Rockets, Propulsion Engineer.");
+        await app.click("#resume-tailor");
+        await app.click("#resume-save-file");
+        ok(!app.byId("resume-open-tex").hidden, "both files are offered");
+
+        await app.click("#resume-tailor");
+        ok(app.byId("resume-open-tex").hidden,
+           "the old .tex is no longer what is on screen");
+        ok(app.byId("resume-open-file").hidden,
+           "nor is the old PDF");
+      });
+
+    test("no LaTeX engine is reported rather than silently ignored",
+      async (app) => {
+        // The .tex comes out styled and the PDF does not. That is a thing
+        // worth knowing before sending the PDF to anyone.
+        await app.tab("resume");
+        app.harness.resumeTemplate = "\\documentclass{article}";
+        app.harness.latexEngine = false;
+        await app.click("#master-resume-import");
+        await app.choose("resume-job-picker", "");
+        await app.type("resume-job-text", "Acme Rockets, Propulsion Engineer.");
+        await app.click("#resume-tailor");
+        await app.click("#resume-save-file");
+
+        const message = app.text("#resume-save-message");
+        contains(message, "no LaTeX engine", "it says why the PDF is not styled");
+        contains(message, "Saved", "and still confirms the save");
+      });
+
     test("tailoring with no resume saved refuses instead of inventing one",
       async (app) => {
         // Tests in a suite share one harness, and the ones above this
