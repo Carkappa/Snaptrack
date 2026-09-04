@@ -76,8 +76,15 @@ over when one fails — an expired key, a rate limit, no network.
 ## Tailoring your resume
 
 Keep your full resume — everything you've done — under **Resume**. Paste it
-in, or **Import a file…** to read it out of a PDF, a Word `.docx` or a text
-file. Then pick a saved application or paste a posting, and it writes a
+in, or **Import a file…** to read it out of a PDF, a Word `.docx`, a LaTeX
+`.tex` or a text file.
+
+**Import a `.tex` and the saved `.tex` comes back in your own style** — same
+document class, same packages, same macros, only the words changed. Your
+preamble is copied through untouched, so nothing can drift; the body is
+rewritten using the commands your document already uses, and checked before
+it's written. If it can't be done cleanly you get the built-in style and a
+line saying why, never a file that won't compile. Then pick a saved application or paste a posting, and it writes a
 shorter one aimed at that job, saved beside your workbook as
 `Resumes/Company-Role.pdf`.
 

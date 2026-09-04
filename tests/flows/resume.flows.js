@@ -170,6 +170,64 @@
       ok(readout() !== before, "cutting a whole entry changes the count: " + readout());
     });
 
+    test("importing a .tex keeps its style and says which document", async (app) => {
+      await app.tab("resume");
+      ok(app.byId("resume-template-card").hidden, "no style before importing one");
+
+      app.harness.pickResumeLatex = true;
+      await app.click("#master-resume-import");
+
+      ok(!app.byId("resume-template-card").hidden, "the style card is shown");
+      const card = app.text("#resume-template-card");
+      contains(card, "your own style", "it says the style is being kept");
+      contains(card, "article", "and names the document class it read");
+      contains(app.text("#master-resume-message"), "LaTeX style was kept", "the message says so");
+      app.harness.pickResumeLatex = false;
+    });
+
+    test("importing a plain file leaves no style behind", async (app) => {
+      await app.tab("resume");
+      app.harness.resumeTemplate = null;
+      await app.click("#master-resume-import");
+      ok(app.byId("resume-template-card").hidden,
+         "a PDF has no style to keep, so nothing should claim one");
+    });
+
+    test("removing the style asks first and goes back to the built-in one",
+      async (app) => {
+        await app.tab("resume");
+        app.harness.pickResumeLatex = true;
+        await app.click("#master-resume-import");
+        app.harness.pickResumeLatex = false;
+
+        app.answerConfirms(false);
+        await app.click("#resume-template-clear");
+        ok(!app.byId("resume-template-card").hidden, "saying no keeps the style");
+
+        app.answerConfirms(true);
+        await app.click("#resume-template-clear");
+        ok(app.byId("resume-template-card").hidden, "saying yes removes it");
+        eq(app.harness.resumeTemplate, null, "and the backend forgot it");
+      });
+
+    test("a style that could not be used is reported, not hidden", async (app) => {
+      await app.tab("resume");
+      app.harness.pickResumeLatex = true;
+      await app.click("#master-resume-import");
+      app.harness.pickResumeLatex = false;
+      app.harness.templateTypesetFails = true;
+
+      await app.choose("resume-job-picker", "");
+      await app.type("resume-job-text", "Acme Rockets, Propulsion Engineer.");
+      await app.click("#resume-tailor");
+      await app.click("#resume-save-file");
+
+      const message = app.text("#resume-save-message");
+      contains(message, "Saved", "it still saved something");
+      contains(message, "not used", "and said the style could not be used");
+      app.harness.templateTypesetFails = false;
+    });
+
     test("tailoring with no resume saved refuses instead of inventing one",
       async (app) => {
         // Tests in a suite share one harness, and the ones above this

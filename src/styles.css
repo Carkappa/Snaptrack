@@ -1874,3 +1874,41 @@ button.detail-row.active {
 .resume-sep {
   color: var(--muted);
 }
+
+/* ---- The LaTeX style card ----------------------------------------------
+   Shown only when a .tex has been imported. Says which document is being
+   kept, because "your style" is not evidence that it read the right one. */
+
+.resume-template {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: var(--control-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.resume-template-mark {
+  font-family: ui-serif, Georgia, "Times New Roman", serif;
+  font-size: 12px;
+  color: var(--fg);
+  flex-shrink: 0;
+}
+
+.resume-template-mark sub {
+  font-size: 0.85em;
+  vertical-align: -0.25em;
+  margin: 0 -0.08em;
+}
+
+#resume-template-text {
+  flex: 1;
+}
+
+#resume-template-text strong {
+  color: var(--fg);
+  font-weight: 600;
+}

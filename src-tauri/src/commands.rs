@@ -1976,10 +1976,24 @@ pub async fn pick_resume_file<R: tauri::Runtime>(
 pub fn import_resume_file<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     path: String,
-) -> Result<String, String> {
-    let text = crate::resume::import_text(std::path::Path::new(&path))?;
-    set_master_resume(app, text.clone())?;
-    Ok(text)
+) -> Result<ImportedResume, String> {
+    let imported = crate::resume::import(std::path::Path::new(&path))?;
+    set_master_resume(app.clone(), imported.text.clone())?;
+
+    // A .tex brings its style with it. Stored beside the master rather
+    // than inside it, because the words and the formatting are edited on
+    // completely different occasions.
+    let mut template = false;
+    if let Some(source) = imported.latex {
+        let path = template_file(&app)?;
+        std::fs::write(&path, source)
+            .map_err(|e| format!("Could not save '{}': {e}", path.display()))?;
+        template = true;
+    }
+    Ok(ImportedResume {
+        text: imported.text,
+        template,
+    })
 }
 
 /// Saves the master resume beside the workbook, as a plain file the user
@@ -2063,10 +2077,177 @@ pub async fn tailor_resume<R: tauri::Runtime>(
         .map_err(|e| format!("{} did not return a resume it could use: {e}", provider.label))
 }
 
+/// What the Resume tab shows about a stored LaTeX style.
+#[derive(serde::Serialize)]
+pub struct ResumeTemplateInfo {
+    /// False when there is no `.tex` stored, which is the common case.
+    pub present: bool,
+    pub path: String,
+    /// The document class, so the card can say which style it is keeping
+    /// rather than just that there is one.
+    pub document_class: String,
+    /// Macros the preamble defines, as evidence it really did read it.
+    pub macros: usize,
+}
+
+/// What was imported, and whether it brought a style with it.
+#[derive(serde::Serialize)]
+pub struct ImportedResume {
+    pub text: String,
+    pub template: bool,
+}
+
+fn template_file<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+    let workbook = resolve_excel_path(app)?;
+    crate::resume::template_path(&workbook)
+        .ok_or_else(|| "The workbook has no folder to save alongside.".to_string())
+}
+
+/// Reads the stored LaTeX style, if there is one.
+fn stored_template<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<crate::latex_template::LatexTemplate> {
+    let path = template_file(app).ok()?;
+    let source = std::fs::read_to_string(path).ok()?;
+    crate::latex_template::split(&source).ok()
+}
+
+#[tauri::command]
+pub fn get_resume_template<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<ResumeTemplateInfo, String> {
+    let path = template_file(&app)?;
+    let display = path.to_string_lossy().to_string();
+    let Ok(source) = std::fs::read_to_string(&path) else {
+        return Ok(ResumeTemplateInfo {
+            present: false,
+            path: display,
+            document_class: String::new(),
+            macros: 0,
+        });
+    };
+    let Ok(template) = crate::latex_template::split(&source) else {
+        return Ok(ResumeTemplateInfo {
+            present: false,
+            path: display,
+            document_class: String::new(),
+            macros: 0,
+        });
+    };
+    Ok(ResumeTemplateInfo {
+        present: true,
+        path: display,
+        document_class: document_class_of(&template.preamble),
+        macros: crate::latex_template::commands_defined_in(&template.preamble).len(),
+    })
+}
+
+/// The document class name out of a preamble, for the settings card.
+fn document_class_of(preamble: &str) -> String {
+    let Some(at) = preamble.find("\\documentclass") else {
+        return String::new();
+    };
+    let rest = &preamble[at + "\\documentclass".len()..];
+    // Skip the optional [11pt,letterpaper] before the class itself.
+    let rest = rest.trim_start();
+    let rest = if let Some(open) = rest.strip_prefix('[') {
+        open.split_once(']').map(|(_, r)| r).unwrap_or(rest)
+    } else {
+        rest
+    };
+    rest.trim_start()
+        .strip_prefix('{')
+        .unwrap_or("")
+        .chars()
+        .take_while(|c| *c != '}')
+        .collect()
+}
+
+/// Forgets the stored style, so saving goes back to the built-in one.
+#[tauri::command]
+pub fn clear_resume_template<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    let path = template_file(&app)?;
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        // Already gone is the state that was asked for.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("Could not remove '{}': {e}", path.display())),
+    }
+}
+
+/// Asks the model to lay the resume out using the author's own macros.
+///
+/// Returns None rather than failing when it cannot be done: a `.tex` in
+/// the built-in style is a worse result than one in yours, but it is a far
+/// better result than a file that will not compile, and the PDF is written
+/// either way.
+async fn typeset_with_template<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    resume: &crate::resume_render::Resume,
+) -> Option<(String, String)> {
+    let template = stored_template(app)?;
+
+    let method = get_extraction_method(app.clone()).ok()?;
+    let provider = crate::models::provider_or_default(&method);
+    if provider.default_model.is_empty() {
+        return Some((
+            String::new(),
+            format!("{} cannot write LaTeX, so the built-in style was used.", provider.label),
+        ));
+    }
+    let api_key = if provider.needs_key {
+        keychain::get_api_key(&provider.id).ok()?
+    } else {
+        String::new()
+    };
+    let api_base = if provider.id == "ollama" {
+        resolve_ollama_host(app)
+    } else {
+        provider.api_base.clone()
+    };
+    let model = resolve_model(app, &provider.id);
+
+    let content = serde_json::to_string_pretty(resume).ok()?;
+    let user = format!(
+        "Reference body from the author's own resume.tex:\n\n{}\n\n---\n\nTailored resume content to typeset:\n\n{}",
+        template.body.trim(),
+        content
+    );
+
+    let raw = match crate::extraction::chat_text(
+        &provider.id,
+        &model,
+        &api_key,
+        &api_base,
+        crate::resume::TYPESET_PROMPT,
+        &user,
+        None,
+    )
+    .await
+    {
+        Ok(raw) => raw,
+        Err(e) => {
+            return Some((
+                String::new(),
+                format!("Your LaTeX style could not be used ({e}), so the built-in one was."),
+            ))
+        }
+    };
+
+    let body = crate::extraction::strip_fences(&raw);
+    match crate::latex_template::validate(&body, &template) {
+        Ok(()) => Some((crate::latex_template::assemble(&template, &body), String::new())),
+        Err(why) => Some((
+            String::new(),
+            format!("Your LaTeX style was not used because {why}. The built-in style was."),
+        )),
+    }
+}
+
 /// Writes a tailored resume into a Resumes folder beside the workbook,
 /// named after the job it was written for.
 #[tauri::command]
-pub fn save_tailored_resume<R: tauri::Runtime>(
+pub async fn save_tailored_resume<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     company: String,
     position: String,
@@ -2087,8 +2268,17 @@ pub fn save_tailored_resume<R: tauri::Runtime>(
     std::fs::write(&pdf_path, pdf)
         .map_err(|e| format!("Could not save '{}': {e}", pdf_path.display()))?;
 
+    // Where the user has their own LaTeX resume, the .tex is written in
+    // *their* document - same class, same packages, same macros - with only
+    // the words replaced. Falling back to the built-in style is always
+    // allowed, and always says why.
+    let (tex, note) = match typeset_with_template(&app, &resume).await {
+        Some((tex, note)) if !tex.is_empty() => (tex, note),
+        Some((_, note)) => (crate::resume_render::to_latex(&resume), note),
+        None => (crate::resume_render::to_latex(&resume), String::new()),
+    };
     let tex_path = dir.join(format!("{stem}.tex"));
-    std::fs::write(&tex_path, crate::resume_render::to_latex(&resume))
+    std::fs::write(&tex_path, tex)
         .map_err(|e| format!("Could not save '{}': {e}", tex_path.display()))?;
 
     // Record it against the application, so the row answers "what did I
@@ -2100,6 +2290,7 @@ pub fn save_tailored_resume<R: tauri::Runtime>(
         pdf,
         tex: tex_path.to_string_lossy().to_string(),
         linked,
+        note,
     })
 }
 
@@ -2139,6 +2330,11 @@ pub struct SavedResume {
     /// False when no saved application matched - a resume tailored from a
     /// pasted posting has no row to attach itself to.
     pub linked: bool,
+    /// Empty when nothing went wrong. Carries the reason the author's own
+    /// LaTeX style was not used, on the occasions it could not be - that
+    /// is a thing they would want to know rather than discover by opening
+    /// the file.
+    pub note: String,
 }
 
 /// Opens a saved resume in whatever the system uses for Markdown.

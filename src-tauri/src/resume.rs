@@ -32,6 +32,79 @@ pub fn master_path(workbook: &Path) -> Option<PathBuf> {
     Some(parent.join("Resume_master.md"))
 }
 
+/// Where a LaTeX style lives: beside the master, so the pair moves with
+/// the workbook the way everything else here does.
+pub fn template_path(workbook: &Path) -> Option<PathBuf> {
+    let parent = workbook.parent().filter(|p| !p.as_os_str().is_empty())?;
+    Some(parent.join("Resume_master.tex"))
+}
+
+/// What an import produced: always the words, and the original document
+/// too when it was a `.tex` worth keeping the style of.
+pub struct Imported {
+    pub text: String,
+    pub latex: Option<String>,
+}
+
+/// Reads a resume file, keeping the LaTeX source when there is one.
+pub fn import(path: &Path) -> Result<Imported, String> {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+
+    if extension == "tex" {
+        let source = std::fs::read_to_string(path)
+            .map_err(|e| format!("Could not read '{}': {e}", path.display()))?;
+        // A .tex that is not a whole document has no style to keep, but it
+        // still has words in it - taking those is better than refusing.
+        if !crate::latex_template::looks_like_latex(&source) {
+            return Ok(Imported {
+                text: tidy(&crate::latex_template::to_plain_text(&source)),
+                latex: None,
+            });
+        }
+        let template = crate::latex_template::split(&source)?;
+        let text = tidy(&crate::latex_template::to_plain_text(&template.body));
+        if text.trim().is_empty() {
+            return Err("That .tex file has no readable text in its body.".to_string());
+        }
+        return Ok(Imported {
+            text,
+            latex: Some(source),
+        });
+    }
+
+    Ok(Imported {
+        text: import_text(path)?,
+        latex: None,
+    })
+}
+
+/// What the model is told when it is writing into someone else's document.
+///
+/// The preamble is not shown to it and not up for discussion - it is
+/// copied through untouched. All this asks for is a body, written with the
+/// macros the original body already used, so the words land in the same
+/// formatting the old words did.
+pub const TYPESET_PROMPT: &str = r#"You are typesetting an already-written resume into an existing LaTeX document, keeping that document's style exactly.
+
+You are given:
+1. The BODY of the author's own resume.tex - everything between \begin{document} and \end{document}. This is your formatting reference.
+2. The tailored resume content, as JSON.
+
+Write a new body containing the JSON's content, laid out with the SAME commands and environments the reference body uses. If it wraps each job in \resumeSubheading, use \resumeSubheading. If it uses \section*, use \section*. Match its argument order and its structure.
+
+Absolute rules:
+1. Output ONLY the body. No \documentclass, no \usepackage, no \begin{document}, no \end{document}, no code fences, no explanation.
+2. Use ONLY commands and environments that appear in the reference body. Do not invent macros, do not reach for a package that is not already in use.
+3. Every word of content must come from the JSON. Do not carry over the reference body's text - that is the old resume, and its jobs are not necessarily in the new one.
+4. Escape LaTeX special characters in content: & % $ # _ { } become \& \% \$ \# \_ \{ \}.
+5. Keep braces balanced and environments matched.
+
+If the JSON has a section the reference has no obvious layout for, use the plainest structure the reference does use."#;
+
 /// Folder for the tailored copies.
 pub fn output_dir(workbook: &Path) -> Option<PathBuf> {
     let parent = workbook.parent().filter(|p| !p.as_os_str().is_empty())?;
@@ -129,7 +202,7 @@ pub fn import_text(path: &Path) -> Result<String, String> {
             .map(|text| tidy(&text))
             .map_err(|e| format!("Could not read '{}': {e}", path.display())),
         other => Err(format!(
-            "Cannot read a '.{other}' file. Use a PDF, a Word .docx, or plain text."
+            "Cannot read a '.{other}' file. Use a PDF, a Word .docx, a LaTeX .tex, or plain text."
         )),
     }
 }

@@ -37,6 +37,10 @@
   <div id="app-frame"></div>
 
   <script>
+    // Stands in for a real imported resume.tex: an article class with a
+    // couple of macros of its own, which is what most of them are.
+    const LATEX_TEMPLATE = { documentClass: "article", macros: 2 };
+
     // ---- Mock Tauri bridge -------------------------------------------------
     //
     // app.js talks to the Rust side only through `invoke`, so standing in a
@@ -68,7 +72,10 @@
       installUpdateCalls: 0,
       installUpdateFails: false,
       pickResumeCancels: false,
+      pickResumeLatex: false,
       importResumeFails: false,
+      resumeTemplate: null,
+      templateTypesetFails: false,
       openedUrls: [],
       // Set true to exercise the rejection path the Rust scheme check produces.
       openUrlFails: false,
@@ -403,13 +410,29 @@
       },
       get_master_resume: () => state.masterResume,
       pick_resume_file: () =>
-        state.pickResumeCancels ? null : "C:/Users/you/Documents/Resume.pdf",
+        state.pickResumeCancels
+          ? null
+          : state.pickResumeLatex
+            ? "C:/Users/you/Documents/Resume.tex"
+            : "C:/Users/you/Documents/Resume.pdf",
       import_resume_file: ({ path }) => {
         if (state.importResumeFails) throw new Error("No readable text in that file.");
         state.masterResume =
           "Jun Du" + "\n" + "Imported from " + path + "\n" + "\n" +
           "Experience" + "\n" + "- Built a job tracker";
-        return state.masterResume;
+        // Mirrors the Rust side: only a .tex brings a style with it.
+        if (/[.]tex$/i.test(path)) state.resumeTemplate = LATEX_TEMPLATE;
+        return { text: state.masterResume, template: Boolean(state.resumeTemplate) };
+      },
+      get_resume_template: () => ({
+        present: Boolean(state.resumeTemplate),
+        path: "C:/Users/you/Documents/Resume_master.tex",
+        document_class: state.resumeTemplate ? state.resumeTemplate.documentClass : "",
+        macros: state.resumeTemplate ? state.resumeTemplate.macros : 0,
+      }),
+      clear_resume_template: () => {
+        state.resumeTemplate = null;
+        return null;
       },
       set_master_resume: ({ text }) => {
         state.masterResume = text;
@@ -461,7 +484,14 @@
           (r) => key(r.company) === key(company) && key(r.position) === key(position),
         );
         if (row) row.resume = stem + ".pdf";
-        return { pdf: stem + ".pdf", tex: stem + ".tex", linked: Boolean(row) };
+        // The Rust side falls back to the built-in style rather than
+        // failing, and reports why - so the mock has to do both, or that
+        // message is never exercised.
+        const note = state.resumeTemplate && state.templateTypesetFails
+          ? "Your LaTeX style was not used because the body calls a macro your document does not define. The built-in style was."
+          : "";
+        state.savedWithTemplate = Boolean(state.resumeTemplate) && !state.templateTypesetFails;
+        return { pdf: stem + ".pdf", tex: stem + ".tex", linked: Boolean(row), note };
       },
       open_saved_resume: ({ path }) => {
         state.openedResumes.push(path);

@@ -2,6 +2,7 @@ pub mod commands;
 mod excel;
 mod extraction;
 mod keychain;
+pub mod latex_template;
 mod local_ocr;
 pub mod resume;
 pub mod resume_render;
@@ -182,6 +183,8 @@ pub fn run() {
             commands::get_master_resume,
             commands::pick_resume_file,
             commands::import_resume_file,
+            commands::get_resume_template,
+            commands::clear_resume_template,
             commands::set_master_resume,
             commands::tailor_resume,
             commands::save_tailored_resume,

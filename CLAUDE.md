@@ -159,6 +159,26 @@ exists so it actually runs somewhere, and that job is the only check on
 the macOS code at all - the other two jobs are Linux, where none of it
 compiles. Expect to find macOS mistakes there rather than locally.
 
+## Keeping someone else's LaTeX style
+
+`latex_template.rs` splits an imported `resume.tex` at `egin{document}`
+and holds the two halves apart for one reason: **the preamble is never
+touched**. Document class, packages, fonts, colours, spacing and every
+custom macro live there, so copying it through byte for byte is what makes
+the style impossible to drift. Only the body is rewritten.
+
+The model writes that body, so it is checked before anything is written -
+balanced braces, matched environments, nothing that belongs to a preamble,
+and no command that the original body did not already use or the preamble
+did not define. A body that fails is refused and the caller falls back to
+the built-in template *with a reason*, because a `.tex` in the wrong style
+is a far better outcome than one that will not compile.
+
+`tests/latex_template.rs` runs the whole path against a Jake's-Resume-shaped
+document, which is the shape most real ones have. Test against that rather
+than the toy in the module's own tests when changing the validator: it is
+easy to write one that only accepts documents as simple as the fixture.
+
 ## Things that will bite you
 
 - **The first-run default is computed, not a constant.** A machine with

@@ -101,6 +101,9 @@
     ollamaModelRow: el("ollama-model-row"),
     masterResume: el("master-resume"),
     masterResumeImport: el("master-resume-import"),
+    resumeTemplateCard: el("resume-template-card"),
+    resumeTemplateText: el("resume-template-text"),
+    resumeTemplateClear: el("resume-template-clear"),
     masterResumeSave: el("master-resume-save"),
     masterResumeMessage: el("master-resume-message"),
     resumeJobPicker: el("resume-job-picker"),
@@ -1511,6 +1514,7 @@ ${e}`;
     } catch (e) {
       dom.masterResumeMessage.textContent = String(e);
     }
+    await refreshResumeTemplate();
     // The picker is filled from the workbook, so tailoring can start from
     // a row already saved rather than retyping the company and role.
     if (allApplications.length === 0) {
@@ -1540,8 +1544,46 @@ ${e}`;
       dom.masterResumeMessage.textContent = "";
       if (!path) return;
       dom.masterResumeMessage.textContent = "Reading…";
-      dom.masterResume.value = await invoke("import_resume_file", { path });
-      dom.masterResumeMessage.textContent = "Imported and saved - check it read cleanly.";
+      const imported = await invoke("import_resume_file", { path });
+      dom.masterResume.value = imported.text;
+      dom.masterResumeMessage.textContent = imported.template
+        ? "Imported, and your LaTeX style was kept."
+        : "Imported and saved - check it read cleanly.";
+      await refreshResumeTemplate();
+    } catch (e) {
+      dom.masterResumeMessage.textContent = String(e);
+    }
+  });
+
+  /// Shows which document's style is being kept, if any.
+  ///
+  /// Names the class and counts the macros rather than saying "a style is
+  /// stored": the useful question is whether it read the file you meant,
+  /// and only the details answer that.
+  async function refreshResumeTemplate() {
+    try {
+      const info = await invoke("get_resume_template");
+      dom.resumeTemplateCard.hidden = !info.present;
+      if (!info.present) return;
+      const macros = info.macros === 1 ? "1 macro" : `${info.macros} macros`;
+      const cls = info.document_class || "your document";
+      dom.resumeTemplateText.innerHTML =
+        `Saving uses <strong>your own style</strong> - ${escapeHtml(cls)}, ${escapeHtml(macros)}. ` +
+        `Only the words change.`;
+    } catch (_) {
+      // A missing workbook is reported by everything else on this tab.
+      dom.resumeTemplateCard.hidden = true;
+    }
+  }
+
+  dom.resumeTemplateClear.addEventListener("click", async () => {
+    if (!confirm("Go back to the built-in resume style? Your .tex file is deleted; the resume text stays.")) {
+      return;
+    }
+    try {
+      await invoke("clear_resume_template");
+      await refreshResumeTemplate();
+      dom.masterResumeMessage.textContent = "Back to the built-in style.";
     } catch (e) {
       dom.masterResumeMessage.textContent = String(e);
     }
@@ -1606,9 +1648,12 @@ ${e}`;
         resume: collectResumeFromSheet(),
       });
       savedResumePath = saved.pdf;
-      dom.resumeSaveMessage.textContent = saved.linked
+      const where = saved.linked
         ? `Saved ${saved.pdf}, and recorded against that application.`
         : `Saved ${saved.pdf} and the .tex beside it.`;
+      // A style that could not be used is worth saying out loud - finding
+      // out by opening the .tex is finding out too late.
+      dom.resumeSaveMessage.textContent = saved.note ? `${where} ${saved.note}` : where;
       // The row now carries the resume, so the list has to be re-read
       // for the link to appear against it.
       if (saved.linked) await loadApplications();
