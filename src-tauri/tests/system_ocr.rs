@@ -3,12 +3,31 @@
 //! Calls the engine directly rather than through a command, so it needs no
 //! Tauri app and runs on a plain Windows machine. Skipped where there is no
 //! system engine, so it passes on the Linux CI runner without pretending to
-//! have tested anything there.
+//! have tested anything there - but never on macOS or Windows, where an
+//! engine is part of the OS and its absence is a real failure rather than
+//! a machine without one. Skipping quietly everywhere is how this test
+//! managed to run nowhere at all before the macos job existed.
+
+/// Whether to run, refusing to skip where the OS guarantees an engine.
+///
+/// Windows has had one since Windows 10 and macOS since 10.15, so on those
+/// two a missing engine means the wrapper is broken, not that the machine
+/// is unusual. Linux has none and skips for real.
+fn engine_or_skip() -> bool {
+    if job_tracker_lib::system_ocr::available() {
+        return true;
+    }
+    assert!(
+        !cfg!(any(target_os = "macos", target_os = "windows")),
+        "this OS ships an OCR engine, so finding none is a failure of the wrapper rather than a reason to skip"
+    );
+    eprintln!("no system OCR engine on this machine - skipping");
+    false
+}
 
 #[tokio::test]
 async fn the_system_engine_reads_a_real_screenshot() {
-    if !job_tracker_lib::system_ocr::available() {
-        eprintln!("no system OCR engine on this machine - skipping");
+    if !engine_or_skip() {
         return;
     }
 
@@ -79,7 +98,7 @@ async fn the_system_engine_reads_a_real_screenshot() {
 
 #[tokio::test]
 async fn junk_input_is_reported_rather_than_panicking() {
-    if !job_tracker_lib::system_ocr::available() {
+    if !engine_or_skip() {
         return;
     }
     assert!(job_tracker_lib::system_ocr::run(b"not an image").await.is_err());

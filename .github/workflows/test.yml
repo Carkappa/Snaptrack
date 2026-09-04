@@ -48,8 +48,12 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends             texlive-latex-base texlive-latex-recommended
 
+      # EXPECT_LATEX turns tests/latex_build.rs's skip into a failure, so
+      # removing the install above cannot quietly remove the coverage too.
       - name: cargo test
         working-directory: src-tauri
+        env:
+          EXPECT_LATEX: "1"
         run: cargo test --locked
 
       # Cargo resolves and rewrites the lockfile here whether or not the

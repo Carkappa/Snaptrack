@@ -64,6 +64,15 @@ Three things about the flow tests that are not obvious:
   headless browser dismisses by default. Use `app.answerConfirms(true)`,
   or the button reads as doing nothing.
 
+**A test that skips must be unable to skip everywhere.** Two here run
+against a real engine and skip without one, which is right on a
+development machine and a lie in CI - a silent skip reads as coverage
+while providing none, and `tests/system_ocr.rs` ran nowhere at all for
+months that way. Both now refuse: `latex_build.rs` fails when the rust
+job's `EXPECT_LATEX` is set, and `system_ocr.rs` fails on macOS or
+Windows, where the OS guarantees an engine and its absence means the
+wrapper is broken. Copy that shape for any new engine-backed test.
+
 When you touch `calendar.js` or `stats.js`, add to the matching test page
 (and to the `for page in ...` loop in the workflow if you add another). When
 you touch a command, prefer a unit test next to it, or

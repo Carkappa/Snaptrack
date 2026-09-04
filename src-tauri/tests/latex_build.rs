@@ -24,8 +24,25 @@ const DOCUMENT: &str = r#"\documentclass[11pt]{article}
 \end{document}
 "#;
 
+/// The engine to test with, or None on a machine that has none.
+///
+/// Skipping is right on a development machine and a lie where the
+/// workflow went to the trouble of installing a TeX: a test that quietly
+/// does nothing reads as coverage while providing none, which is the exact
+/// way tests/system_ocr.rs managed to run nowhere for months. The rust job
+/// sets EXPECT_LATEX, and this refuses to skip when it is set.
 fn engine() -> Option<&'static str> {
-    latex_build::find_engine("")
+    match latex_build::find_engine("") {
+        Some(engine) => Some(engine),
+        None => {
+            assert!(
+                std::env::var("EXPECT_LATEX").is_err(),
+                "EXPECT_LATEX is set but no LaTeX engine was found - the workflow installs one so this test cannot silently cover nothing"
+            );
+            eprintln!("skipped: no LaTeX engine on this machine");
+            None
+        }
+    }
 }
 
 #[test]
