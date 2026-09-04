@@ -93,8 +93,8 @@ Saving against a saved application records the PDF on that row, so the
 **Resume** column in the list opens what you actually sent.
 
 The model is told to cut and reorder, never to invent. **Read it before you
-send it** — if it claims something you didn't do, that's a bug worth
-reporting. Needs a model-backed method; the OCR engines read but can't write.
+send it** — if it claims something you didn't do, cut the line and tell me,
+because that's a bug worth reporting. Needs a model-backed method; the OCR engines read but can't write.
 
 ## Also
 
