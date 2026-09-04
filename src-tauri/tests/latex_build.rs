@@ -1,5 +1,10 @@
 //! Compiling a real `.tex` with a real TeX engine.
 //!
+//! Cleanup of the scratch directory is a unit test in the module rather
+//! than one here: tests share a process and a temp directory, so counting
+//! folders from out here catches other tests' compiles in flight and fails
+//! for reasons that have nothing to do with the code under test. It did.
+//!
 //! Skips where no engine is installed, the same way `tests/system_ocr.rs`
 //! skips where there is no OS OCR engine. That means it does nothing on a
 //! bare development machine, so the `rust` job in `test.yml` installs a
@@ -88,38 +93,4 @@ fn a_broken_document_fails_with_the_reason_rather_than_hanging() {
             || error.to_lowercase().contains("class"),
         "the reason should name the problem, got: {error}"
     );
-}
-
-#[test]
-fn compiling_leaves_nothing_behind_in_the_temp_directory() {
-    let Some(engine) = engine() else {
-        eprintln!("skipped: no LaTeX engine on this machine");
-        return;
-    };
-
-    let before = scratch_folders();
-    let _ = latex_build::compile(DOCUMENT, engine, None);
-    let after = scratch_folders();
-
-    // The .aux, .log and .out files a TeX run drops must not accumulate,
-    // and must never land beside the resumes the user actually wants.
-    assert_eq!(
-        before, after,
-        "a scratch folder was left behind after compiling"
-    );
-}
-
-fn scratch_folders() -> usize {
-    std::fs::read_dir(std::env::temp_dir())
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|e| {
-                    e.file_name()
-                        .to_string_lossy()
-                        .starts_with("job-tracker-tex-")
-                })
-                .count()
-        })
-        .unwrap_or(0)
 }

@@ -147,19 +147,41 @@ fn wants_rerun(log: &str) -> bool {
 /// `.aux`, `.log` and `.out` droppings never land in the user's Resumes
 /// folder next to the files they actually want.
 pub fn compile(tex: &str, engine: &str, resources: Option<&Path>) -> Result<Vec<u8>, String> {
+    with_scratch_dir(|dir| compile_in(dir, tex, engine, resources))
+}
+
+/// Runs `work` in a directory of its own, and takes the directory away
+/// afterwards whether the work succeeded or not.
+fn with_scratch_dir<T>(work: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, String> {
     let dir = scratch_dir()?;
-    let result = compile_in(&dir, tex, engine, resources);
+    let result = work(&dir);
     // Best-effort: a locked file on Windows should not turn a successful
     // compile into a failure.
     let _ = std::fs::remove_dir_all(&dir);
     result
 }
 
+/// A directory no other run will pick.
+///
+/// The first version of this used `Instant::now().elapsed()`, which is the
+/// time since a moment measured immediately after it - near enough zero
+/// every time. Every concurrent compile in one process therefore got the
+/// *same* folder, wrote `resume.tex` over each other's, and deleted the
+/// other's output on the way out. A counter is the part that actually
+/// guarantees this; the clock only keeps two processes apart.
 fn scratch_dir() -> Result<PathBuf, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     let unique = format!(
-        "job-tracker-tex-{}-{}",
+        "job-tracker-tex-{}-{}-{}",
         std::process::id(),
-        Instant::now().elapsed().as_nanos()
+        since_epoch,
+        NEXT.fetch_add(1, Ordering::Relaxed)
     );
     let dir = std::env::temp_dir().join(unique);
     std::fs::create_dir_all(&dir)
@@ -220,6 +242,40 @@ fn compile_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scratch_directories_are_unique_and_taken_away_afterwards() {
+        // Not a global count of temp folders: tests share a process and a
+        // temp directory, so counting catches other tests' work in flight
+        // and fails for reasons that have nothing to do with this code.
+        let mut used = Vec::new();
+        for _ in 0..8 {
+            with_scratch_dir(|dir| {
+                std::fs::write(dir.join("resume.log"), "droppings").unwrap();
+                used.push(dir.to_path_buf());
+                Ok(())
+            })
+            .unwrap();
+        }
+
+        let distinct: std::collections::HashSet<_> = used.iter().collect();
+        assert_eq!(distinct.len(), used.len(), "two runs shared a folder");
+        for dir in &used {
+            assert!(!dir.exists(), "{} was left behind", dir.display());
+        }
+    }
+
+    #[test]
+    fn a_failing_run_still_takes_its_directory_away() {
+        let mut path = None;
+        let result: Result<(), String> = with_scratch_dir(|dir| {
+            path = Some(dir.to_path_buf());
+            std::fs::write(dir.join("resume.log"), "!Error").unwrap();
+            Err("it did not compile".to_string())
+        });
+        assert!(result.is_err(), "the error has to come back out");
+        assert!(!path.unwrap().exists(), "a failed run must not leave a folder");
+    }
 
     #[test]
     fn a_fontspec_preamble_rules_out_pdflatex() {
