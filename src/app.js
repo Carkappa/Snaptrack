@@ -108,7 +108,10 @@
     resumeTailor: el("resume-tailor"),
     resumeTailorMessage: el("resume-tailor-message"),
     resumeResultGroup: el("resume-result-group"),
-    resumeResult: el("resume-result"),
+    resumePreview: el("resume-preview"),
+    resumeLengthLabel: el("resume-length-label"),
+    resumeLengthMeter: el("resume-length-meter"),
+    resumeRevert: el("resume-revert"),
     resumeSaveFile: el("resume-save-file"),
     resumeOpenFile: el("resume-open-file"),
     resumeSaveMessage: el("resume-save-message"),
@@ -1359,22 +1362,147 @@ ${e}`;
   // the .tex from this, not from the text on screen.
   let tailoredResume = null;
 
-  /// A readable rendering of the structure, for checking before sending.
-  function resumePreview(r) {
-    const lines = [r.name, r.contact, ""];
-    if (r.summary) lines.push(r.summary, "");
+  // ---------- The tailored resume, as an editable sheet ----------
+  //
+  // It used to be a read-only dump in a textarea, with a hint saying that
+  // to change a word you should edit the saved PDF. That is backwards: the
+  // one instruction this feature really has - "if it says something you
+  // did not do, take it out" - was the one thing you could not act on.
+  // The preview is now the document, every line is editable, and what is
+  // saved is what is on screen.
+
+  const ITEM_SEPARATOR = " · ";
+
+  /// One editable field. plaintext-only so a paste from a browser cannot
+  /// bring markup with it - this text is bound for a PDF, not a page.
+  function editable(cls, value, placeholder) {
+    return `<span class="${cls} resume-field" contenteditable="plaintext-only" spellcheck="false" data-placeholder="${escapeHtml(placeholder)}">${escapeHtml(value || "")}</span>`;
+  }
+
+  /// A field that only exists when it has something in it.
+  ///
+  /// The sheet is meant to read as the page it will become, and a column
+  /// of grey "No summary" / "No listed items" placeholders down an
+  /// otherwise finished document reads as a form instead. Emptying a field
+  /// that is on screen keeps it - it only disappears on the next render.
+  function optional(cls, value, placeholder) {
+    return value && value.trim() ? editable(cls, value, placeholder) : "";
+  }
+
+  function cutButton(what) {
+    return `<button type="button" class="resume-cut" data-cut="${what}" title="Remove this ${what}" aria-label="Remove this ${what}">&times;</button>`;
+  }
+
+  function renderResumeSheet(r) {
+    const parts = [];
+    parts.push(`<div class="resume-headline">`);
+    parts.push(editable("resume-name", r.name, "Your name"));
+    parts.push(editable("resume-contact", r.contact, "Email, phone, links"));
+    parts.push(`</div>`);
+    parts.push(optional("resume-summary", r.summary, "Summary"));
+
     for (const section of r.sections || []) {
-      lines.push(section.heading.toUpperCase());
-      if (section.items && section.items.length) lines.push(section.items.join(" · "));
+      parts.push(`<div class="resume-section">`);
+      // Reuses .section-label so this reads in the same visual vocabulary
+      // as the rest of the app rather than inventing a third heading style.
+      parts.push(`<div class="section-label">`);
+      parts.push(editable("resume-heading", section.heading, "Section"));
+      parts.push(cutButton("section"));
+      parts.push(`</div>`);
+
+      // Skills and similar lists sit on one line, separated the way the
+      // PDF separates them, so editing them is editing the line you see.
+      parts.push(optional("resume-items", (section.items || []).join(ITEM_SEPARATOR), "Items"));
+
       for (const entry of section.entries || []) {
-        const right = [entry.location, entry.dates].filter(Boolean).join(", ");
-        lines.push(`${entry.title}${right ? "  -  " + right : ""}`);
-        if (entry.organisation) lines.push(`  ${entry.organisation}`);
-        for (const bullet of entry.bullets || []) lines.push(`  • ${bullet}`);
+        parts.push(`<div class="resume-entry">`);
+        parts.push(`<div class="resume-entry-head">`);
+        parts.push(editable("resume-entry-title", entry.title, "Title"));
+        parts.push(`<span class="resume-entry-meta">`);
+        parts.push(optional("resume-entry-location", entry.location, "Location"));
+        // The separator belongs to the pair, not to either half, or a job
+        // with dates and no location renders with a leading middot.
+        if (entry.location && entry.dates) {
+          parts.push(`<span class="resume-sep">${ITEM_SEPARATOR}</span>`);
+        }
+        parts.push(optional("resume-entry-dates", entry.dates, "Dates"));
+        parts.push(`</span>`);
+        parts.push(cutButton("entry"));
+        parts.push(`</div>`);
+        parts.push(optional("resume-entry-org", entry.organisation, "Organisation"));
+        parts.push(`<ul class="resume-bullets">`);
+        for (const bullet of entry.bullets || []) {
+          parts.push(`<li>${editable("resume-bullet", bullet, "Empty line")}${cutButton("bullet")}</li>`);
+        }
+        parts.push(`</ul>`);
+        parts.push(`</div>`);
       }
-      lines.push("");
+      parts.push(`</div>`);
     }
-    return lines.join("\n");
+    dom.resumePreview.innerHTML = parts.join("");
+    updateResumeLength();
+  }
+
+  /// Reads the sheet back into the shape the Rust side expects.
+  ///
+  /// Structural rather than by index: entries and bullets can be removed
+  /// while you read, so anything keyed off the original positions would
+  /// eventually write the wrong text under the wrong job.
+  function collectResumeFromSheet() {
+    const root = dom.resumePreview;
+    const text = (el) => (el ? el.textContent.trim() : "");
+    const pick = (scope, selector) => text(scope.querySelector(selector));
+    return {
+      name: pick(root, ".resume-name"),
+      contact: pick(root, ".resume-contact"),
+      summary: pick(root, ".resume-summary"),
+      sections: Array.from(root.querySelectorAll(".resume-section")).map((section) => ({
+        heading: pick(section, ".resume-heading"),
+        items: pick(section, ".resume-items")
+          .split(ITEM_SEPARATOR.trim())
+          .map((item) => item.trim())
+          .filter(Boolean),
+        entries: Array.from(section.querySelectorAll(".resume-entry")).map((entry) => ({
+          title: pick(entry, ".resume-entry-title"),
+          organisation: pick(entry, ".resume-entry-org"),
+          dates: pick(entry, ".resume-entry-dates"),
+          location: pick(entry, ".resume-entry-location"),
+          bullets: Array.from(entry.querySelectorAll(".resume-bullet"))
+            .map(text)
+            .filter(Boolean),
+        })),
+      })),
+    };
+  }
+
+  // Roughly what one page of this PDF holds. The renderer wraps at a fixed
+  // width and leads at a fixed size, so lines are a better proxy for pages
+  // than characters are - and one page is what the prompt asks the model for.
+  const LINES_PER_PAGE = 46;
+
+  function updateResumeLength() {
+    const r = collectResumeFromSheet();
+    let lines = 2;
+    if (r.summary) lines += 2;
+    for (const section of r.sections) {
+      lines += 1;
+      if (section.items.length) lines += 1;
+      for (const entry of section.entries) {
+        lines += 1;
+        if (entry.organisation) lines += 1;
+        lines += entry.bullets.length;
+      }
+    }
+    const pages = lines / LINES_PER_PAGE;
+    dom.resumeLengthMeter.style.width = `${Math.min(100, Math.round(pages * 100))}%`;
+    // Over a page is not an error - a senior resume legitimately runs to
+    // two - so this reports rather than complains.
+    dom.resumeLengthLabel.parentElement.classList.toggle("resume-length-over", pages > 1);
+    dom.resumeLengthLabel.textContent = pages > 2
+      ? `About ${lines} lines, over two pages.`
+      : pages > 1
+        ? `About ${lines} lines, a little over one page.`
+        : `About ${lines} lines, fits one page.`;
   }
 
   async function loadResumeTab() {
@@ -1452,8 +1580,9 @@ ${e}`;
         notes: job && job.notes ? job.notes : "",
         pasted,
       });
-      dom.resumeResult.value = resumePreview(tailoredResume);
+      renderResumeSheet(tailoredResume);
       dom.resumeResultGroup.hidden = false;
+      dom.resumeRevert.hidden = true;
       dom.resumeTailorMessage.textContent = "Done - read it before you send it.";
       savedResumePath = null;
       dom.resumeOpenFile.hidden = true;
@@ -1472,7 +1601,9 @@ ${e}`;
       const saved = await invoke("save_tailored_resume", {
         company: job ? job.company : "",
         position: job ? job.position : "",
-        resume: tailoredResume,
+        // What is on screen, not what came back from the model - the whole
+        // point of making the sheet editable.
+        resume: collectResumeFromSheet(),
       });
       savedResumePath = saved.pdf;
       dom.resumeSaveMessage.textContent = saved.linked
@@ -1485,6 +1616,33 @@ ${e}`;
     } catch (e) {
       dom.resumeSaveMessage.textContent = String(e);
     }
+  });
+
+  // Removing a line is one click, because "take out anything you did not
+  // do" is the instruction this feature rests on.
+  dom.resumePreview.addEventListener("click", (e) => {
+    const cut = e.target.closest(".resume-cut");
+    if (!cut) return;
+    const scope = { section: ".resume-section", entry: ".resume-entry", bullet: "li" };
+    const target = cut.closest(scope[cut.dataset.cut]);
+    if (!target) return;
+    target.remove();
+    dom.resumeRevert.hidden = false;
+    updateResumeLength();
+  });
+
+  dom.resumePreview.addEventListener("input", () => {
+    dom.resumeRevert.hidden = false;
+    updateResumeLength();
+  });
+
+  // A safety net for the edit that went wrong, without spending another
+  // model call to get back to where you already were.
+  dom.resumeRevert.addEventListener("click", () => {
+    if (!tailoredResume) return;
+    renderResumeSheet(tailoredResume);
+    dom.resumeRevert.hidden = true;
+    dom.resumeSaveMessage.textContent = "Back to what the model wrote.";
   });
 
   dom.resumeOpenFile.addEventListener("click", async () => {

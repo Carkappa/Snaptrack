@@ -62,7 +62,8 @@
 
         const call = app.lastCall("tailor_resume");
         eq(call.args.company, "Stripe", "the company came from the picked row");
-        ok(app.byId("resume-result").value.length > 0, "a tailored resume came back");
+        ok(app.all("#resume-preview .resume-bullet").length > 0,
+           "a tailored resume was rendered into the sheet");
       });
 
     test("saving against a saved application records it on the row", async (app) => {
@@ -98,6 +99,75 @@
       contains(message, "Saved", "it saved");
       ok(message.indexOf("recorded against") === -1,
          "it must not claim a row it never matched: " + message);
+    });
+
+    test("an edit in the sheet is what gets saved, not what the model wrote",
+      async (app) => {
+        await app.tab("resume");
+        await app.click("#master-resume-import");
+        await app.choose("resume-job-picker", "");
+        await app.type("resume-job-text", "Acme Rockets, Propulsion Engineer.");
+        await app.click("#resume-tailor");
+
+        const bullet = app.$("#resume-preview .resume-bullet");
+        bullet.textContent = "Rewrote this line by hand";
+        bullet.dispatchEvent(new app.win.Event("input", { bubbles: true }));
+        await app.click("#resume-save-file");
+
+        const sent = app.lastCall("save_tailored_resume").args.resume;
+        const bullets = sent.sections.flatMap((s) => s.entries.flatMap((e) => e.bullets));
+        ok(bullets.indexOf("Rewrote this line by hand") !== -1,
+           "the edited line reached the backend: " + JSON.stringify(bullets));
+      });
+
+    test("cutting a line removes it from what is sent", async (app) => {
+      await app.tab("resume");
+      await app.click("#master-resume-import");
+      await app.choose("resume-job-picker", "");
+      await app.type("resume-job-text", "Acme Rockets, Propulsion Engineer.");
+      await app.click("#resume-tailor");
+
+      const before = app.all("#resume-preview .resume-bullet").length;
+      ok(before > 0, "there is a bullet to cut");
+      const doomed = app.$("#resume-preview .resume-bullet").textContent;
+      await app.click('#resume-preview .resume-cut[data-cut="bullet"]');
+
+      eq(app.all("#resume-preview .resume-bullet").length, before - 1, "the line went");
+      await app.click("#resume-save-file");
+      const sent = app.lastCall("save_tailored_resume").args.resume;
+      const bullets = sent.sections.flatMap((s) => s.entries.flatMap((e) => e.bullets));
+      ok(bullets.indexOf(doomed) === -1, "the cut line is not in the saved resume");
+    });
+
+    test("undoing edits puts the model's version back", async (app) => {
+      await app.tab("resume");
+      await app.click("#master-resume-import");
+      await app.choose("resume-job-picker", "");
+      await app.type("resume-job-text", "Acme Rockets, Propulsion Engineer.");
+      await app.click("#resume-tailor");
+
+      const original = app.all("#resume-preview .resume-bullet").length;
+      ok(app.byId("resume-revert").hidden, "nothing to undo before an edit");
+      await app.click('#resume-preview .resume-cut[data-cut="bullet"]');
+      ok(!app.byId("resume-revert").hidden, "undo is offered once you have edited");
+
+      await app.click("#resume-revert");
+      eq(app.all("#resume-preview .resume-bullet").length, original, "the line came back");
+      ok(app.byId("resume-revert").hidden, "and there is nothing left to undo");
+    });
+
+    test("the length readout tracks what is actually on the sheet", async (app) => {
+      await app.tab("resume");
+      await app.click("#master-resume-import");
+      await app.choose("resume-job-picker", "");
+      await app.type("resume-job-text", "Acme Rockets, Propulsion Engineer.");
+      await app.click("#resume-tailor");
+
+      const readout = () => app.text("#resume-length-label");
+      contains(readout(), "lines", "it reports a length");
+      const before = readout();
+      await app.click('#resume-preview .resume-cut[data-cut="entry"]');
+      ok(readout() !== before, "cutting a whole entry changes the count: " + readout());
     });
 
     test("tailoring with no resume saved refuses instead of inventing one",

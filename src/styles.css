@@ -1707,3 +1707,170 @@ button.detail-row.active {
 .retry-toast span {
   flex: 1;
 }
+
+/* ---- Tailored resume preview -------------------------------------------
+   A sheet rather than a form: what you are checking is a document, and a
+   stack of labelled inputs does not read like one. Every text node is
+   editable in place, because the instruction that matters here is "delete
+   anything you did not do", and that has to be one click rather than a
+   round trip through a re-tailor. */
+
+.resume-sheet {
+  background: var(--card);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius);
+  padding: 16px 16px 12px;
+  box-shadow: var(--shadow-sm);
+  max-height: 420px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.resume-sheet [contenteditable]:focus {
+  outline: none;
+  background: var(--accent-soft);
+  border-radius: 3px;
+}
+
+/* Empty editable fields collapse to nothing and become untargetable, so
+   they carry their label as placeholder text until they have content. */
+.resume-sheet [contenteditable]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+}
+
+.resume-name {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.resume-contact,
+.resume-summary {
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.resume-summary {
+  color: var(--fg);
+  margin-top: 6px;
+}
+
+.resume-items {
+  color: var(--fg);
+}
+
+/* Rows that carry a remove button reveal it on hover or focus, so the
+   sheet reads as a document until you go looking for the control.
+   Written against the button rather than a particular parent, because it
+   hangs off three different ones - a section label, an entry head, a
+   bullet - and those already have layouts of their own. */
+.resume-sheet .resume-cut {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.resume-sheet *:hover > .resume-cut,
+.resume-sheet *:focus-within > .resume-cut {
+  opacity: 1;
+}
+
+.resume-cut {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+}
+
+.resume-cut:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.resume-entry {
+  margin: 8px 0 0;
+}
+
+.resume-entry-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resume-entry-title {
+  font-weight: 600;
+}
+
+.resume-entry-meta {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.resume-entry-org {
+  color: var(--muted);
+}
+
+.resume-bullets {
+  list-style: none;
+  margin: 3px 0 0;
+  padding: 0;
+}
+
+.resume-bullets li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.resume-bullets li::before {
+  content: "\2022";
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.resume-length {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.resume-length-track {
+  flex: 1;
+}
+
+/* Over a page is not an error - a senior resume legitimately runs to two -
+   so it warns in the accent colour rather than the danger one. */
+.resume-length-over .meter-fill {
+  background: var(--accent);
+}
+
+.resume-headline {
+  display: flex;
+  flex-direction: column;
+}
+
+.resume-field {
+  display: inline-block;
+  min-width: 1ch;
+}
+
+.resume-name,
+.resume-contact,
+.resume-summary,
+.resume-items,
+.resume-entry-org {
+  display: block;
+}
+
+.resume-sep {
+  color: var(--muted);
+}

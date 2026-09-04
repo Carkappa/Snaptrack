@@ -324,18 +324,22 @@
         <div class="settings-group" id="resume-result-group" hidden>
           <h2>Tailored for this job</h2>
           <p class="hint">
-            Read it before you send it. Nothing here should be new - if it
-            says something you did not do, delete it and tell me.
+            This is the page, near enough. Every line is editable - click and
+            type. Nothing here should be new: if it says something you did
+            not do, remove it with the &times; and tell me.
           </p>
-          <textarea id="resume-result" rows="14" spellcheck="false" readonly></textarea>
+          <div id="resume-preview" class="resume-sheet" aria-label="Tailored resume preview"></div>
+          <div class="resume-length">
+            <span id="resume-length-label" class="hint"></span>
+            <span class="meter resume-length-track" aria-hidden="true"><span id="resume-length-meter" class="meter-fill"></span></span>
+          </div>
           <p class="hint">
             Saving writes a <strong>PDF</strong> to send and a
-            <code>.tex</code> alongside it if you'd rather typeset it
-            yourself. To change the wording, edit those - or tailor it
-            again.
+            <code>.tex</code> alongside it, both exactly as they read above.
           </p>
           <div class="settings-actions">
             <button id="resume-save-file" class="btn btn-primary btn-small">Save PDF</button>
+            <button id="resume-revert" class="btn btn-link btn-small" hidden>Undo my edits</button>
             <button id="resume-open-file" class="btn btn-link btn-small" hidden>Open the PDF</button>
             <span id="resume-save-message" class="hint"></span>
           </div>

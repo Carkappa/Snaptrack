@@ -84,6 +84,11 @@ shorter one aimed at that job, saved beside your workbook as
 You get a **PDF** to send, and a `.tex` beside it if you'd rather typeset it
 yourself. No LaTeX install needed — the PDF is generated directly.
 
+The tailored version is shown as the page it will become, and every line
+of it is editable - click and type, or press the &times; to cut a line.
+What you save is what is on screen, and a length readout tells you whether
+it still fits a page.
+
 Saving against a saved application records the PDF on that row, so the
 **Resume** column in the list opens what you actually sent.
 
