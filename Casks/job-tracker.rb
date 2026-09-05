@@ -12,8 +12,8 @@ cask "job-tracker" do
   arch arm: "aarch64", intel: "x64"
 
   version "0.14.0"
-  sha256 arm:   "ca4c76b95126174d0358da3bf0def25b6f6746820e872c0cdcfc8f3ee2546665",
-         intel: "80a1c101f54ab4b24a07b14a60eb057727e3243e7dd21b88a9f646faccde33b7"
+  sha256 arm:   "50b9347632c4e8688b741fc89a39d3155f8a705b681a665e3dacf278b740c8cb",
+         intel: "3bf630647c35709991368838edbc35919a6f8a13d0e039b76797393afbe2f3db"
 
   url "https://github.com/Carkappa/Snaptrack/releases/download/v#{version}/Job.Tracker_#{version}_#{arch}.dmg",
       verified: "github.com/Carkappa/Snaptrack/"
