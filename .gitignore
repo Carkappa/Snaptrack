@@ -7,3 +7,7 @@ node_modules
 dist
 .env
 updater.conf.json
+
+# The updater manifest is published as a release asset, not kept here;
+# a stale copy in the repo is worse than none.
+latest.json
