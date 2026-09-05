@@ -11,7 +11,7 @@ cask "job-tracker" do
   # CI builds both Mac architectures; Homebrew picks the right one.
   arch arm: "aarch64", intel: "x64"
 
-  version "0.13.0"
+  version "0.14.0"
   sha256 arm:   "ca4c76b95126174d0358da3bf0def25b6f6746820e872c0cdcfc8f3ee2546665",
          intel: "80a1c101f54ab4b24a07b14a60eb057727e3243e7dd21b88a9f646faccde33b7"
 
